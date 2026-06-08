@@ -514,13 +514,13 @@ func FilterThinkingBlocks(body []byte) []byte {
 	return filterThinkingBlocksInternal(body, false)
 }
 
-// SanitizeMalformedThinkingBlocks proactively removes malformed historical thinking blocks.
+// SanitizeHistoricalThinkingBlocks proactively removes historical thinking blocks.
 //
 // Some clients replay assistant history from a different model/provider and include
-// {"type":"thinking"} blocks with an empty or missing "thinking" field. Anthropic rejects
-// those before generation with:
-// "each thinking block must contain thinking".
-func SanitizeMalformedThinkingBlocks(body []byte) ([]byte, bool) {
+// thinking blocks whose signatures cannot be validated by the target Anthropic
+// upstream. The proxy cannot verify those signatures locally, so the only reliable
+// way to avoid upstream 400s is to strip/downgrade historical thinking before send.
+func SanitizeHistoricalThinkingBlocks(body []byte) ([]byte, bool) {
 	if !bytes.Contains(body, []byte("thinking")) {
 		return body, false
 	}
@@ -531,26 +531,23 @@ func SanitizeMalformedThinkingBlocks(body []byte) ([]byte, bool) {
 		return body, false
 	}
 
-	malformed := false
+	hasHistoricalThinking := false
 	msgsRes.ForEach(func(_, msg gjson.Result) bool {
 		content := msg.Get("content")
 		if !content.Exists() || !content.IsArray() {
 			return true
 		}
 		content.ForEach(func(_, block gjson.Result) bool {
-			if block.Get("type").String() != "thinking" {
-				return true
-			}
-			thinking := block.Get("thinking")
-			if !thinking.Exists() || strings.TrimSpace(thinking.String()) == "" {
-				malformed = true
+			blockType := block.Get("type").String()
+			if blockType == "thinking" || blockType == "redacted_thinking" || block.Get("thinking").Exists() {
+				hasHistoricalThinking = true
 				return false
 			}
 			return true
 		})
-		return !malformed
+		return !hasHistoricalThinking
 	})
-	if !malformed {
+	if !hasHistoricalThinking {
 		return body, false
 	}
 

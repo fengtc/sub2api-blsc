@@ -5475,7 +5475,7 @@ func (s *GatewayService) buildUpstreamRequestAnthropicAPIKeyPassthrough(
 	if sanitized, changed := sanitizeAnthropicBodyForBetaTokens(body, clientBeta); changed {
 		body = sanitized
 	}
-	if sanitized, changed := SanitizeMalformedThinkingBlocks(body); changed {
+	if sanitized, changed := SanitizeHistoricalThinkingBlocks(body); changed {
 		body = sanitized
 	}
 	if sanitized, changed := sanitizeDeprecatedClaudeSamplingParams(body, ""); changed {
@@ -6349,7 +6349,7 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 	if sanitized, changed := sanitizeDeprecatedClaudeSamplingParams(body, modelID); changed {
 		body = sanitized
 	}
-	if sanitized, changed := SanitizeMalformedThinkingBlocks(body); changed {
+	if sanitized, changed := SanitizeHistoricalThinkingBlocks(body); changed {
 		body = sanitized
 	}
 
@@ -6493,7 +6493,7 @@ func (s *GatewayService) buildUpstreamRequestAnthropicVertex(
 			vertexBody = sanitized
 		}
 	}
-	if sanitized, changed := SanitizeMalformedThinkingBlocks(vertexBody); changed {
+	if sanitized, changed := SanitizeHistoricalThinkingBlocks(vertexBody); changed {
 		vertexBody = sanitized
 	}
 	fullURL, err := buildVertexAnthropicURL(account.VertexProjectID(), account.VertexLocation(modelID), modelID, reqStream)
@@ -9744,7 +9744,7 @@ func (s *GatewayService) buildCountTokensRequestAnthropicAPIKeyPassthrough(
 	if sanitized, changed := sanitizeAnthropicBodyForBetaTokens(body, clientBeta); changed {
 		body = sanitized
 	}
-	if sanitized, changed := SanitizeMalformedThinkingBlocks(body); changed {
+	if sanitized, changed := SanitizeHistoricalThinkingBlocks(body); changed {
 		body = sanitized
 	}
 
@@ -9838,7 +9838,7 @@ func (s *GatewayService) buildCountTokensRequest(ctx context.Context, c *gin.Con
 	if ctFingerprint != nil && ctEnableFP {
 		body = syncBillingHeaderVersion(body, ctFingerprint.UserAgent)
 	}
-	if sanitized, changed := SanitizeMalformedThinkingBlocks(body); changed {
+	if sanitized, changed := SanitizeHistoricalThinkingBlocks(body); changed {
 		body = sanitized
 	}
 

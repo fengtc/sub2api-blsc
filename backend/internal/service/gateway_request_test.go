@@ -407,7 +407,7 @@ func TestFilterThinkingBlocksForRetry_DropsThinkingBlockWithEmptyContent(t *test
 	require.Equal(t, "Answer", content[0].(map[string]any)["text"])
 }
 
-func TestSanitizeMalformedThinkingBlocks_ProactivelyDropsEmptyThinking(t *testing.T) {
+func TestSanitizeHistoricalThinkingBlocks_ProactivelyDropsEmptyThinking(t *testing.T) {
 	input := []byte(`{
 		"thinking":{"type":"enabled","budget_tokens":1024},
 		"messages":[
@@ -419,7 +419,7 @@ func TestSanitizeMalformedThinkingBlocks_ProactivelyDropsEmptyThinking(t *testin
 		]
 	}`)
 
-	out, changed := SanitizeMalformedThinkingBlocks(input)
+	out, changed := SanitizeHistoricalThinkingBlocks(input)
 	require.True(t, changed)
 
 	var req map[string]any
@@ -433,7 +433,7 @@ func TestSanitizeMalformedThinkingBlocks_ProactivelyDropsEmptyThinking(t *testin
 	require.Equal(t, "Answer", content[0].(map[string]any)["text"])
 }
 
-func TestSanitizeMalformedThinkingBlocks_KeepsValidThinking(t *testing.T) {
+func TestSanitizeHistoricalThinkingBlocks_StripsSignedThinkingBeforeUpstream(t *testing.T) {
 	input := []byte(`{
 		"thinking":{"type":"enabled","budget_tokens":1024},
 		"messages":[
@@ -444,9 +444,19 @@ func TestSanitizeMalformedThinkingBlocks_KeepsValidThinking(t *testing.T) {
 		]
 	}`)
 
-	out, changed := SanitizeMalformedThinkingBlocks(input)
-	require.False(t, changed)
-	require.JSONEq(t, string(input), string(out))
+	out, changed := SanitizeHistoricalThinkingBlocks(input)
+	require.True(t, changed)
+
+	var req map[string]any
+	require.NoError(t, json.Unmarshal(out, &req))
+	require.NotContains(t, req, "thinking")
+	msgs := req["messages"].([]any)
+	assistant := msgs[0].(map[string]any)
+	content := assistant["content"].([]any)
+	require.Len(t, content, 2)
+	require.Equal(t, "text", content[0].(map[string]any)["type"])
+	require.Equal(t, "valid thought", content[0].(map[string]any)["text"])
+	require.Equal(t, "Answer", content[1].(map[string]any)["text"])
 }
 
 func TestFilterThinkingBlocksForRetry_EmptyContentGetsPlaceholder(t *testing.T) {
