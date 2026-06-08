@@ -134,6 +134,7 @@ func TestAccountIsModelSupported(t *testing.T) {
 	tests := []struct {
 		name           string
 		platform       string
+		accountType    string
 		credentials    map[string]any
 		requestedModel string
 		expected       bool
@@ -149,6 +150,38 @@ func TestAccountIsModelSupported(t *testing.T) {
 			name:           "empty mapping allows all",
 			credentials:    map[string]any{},
 			requestedModel: "any-model",
+			expected:       true,
+		},
+		{
+			name:           "anthropic oauth empty mapping supports default claude model",
+			platform:       PlatformAnthropic,
+			accountType:    AccountTypeOAuth,
+			credentials:    map[string]any{},
+			requestedModel: "claude-opus-4-8",
+			expected:       true,
+		},
+		{
+			name:           "anthropic oauth empty mapping supports claude short alias",
+			platform:       PlatformAnthropic,
+			accountType:    AccountTypeOAuth,
+			credentials:    map[string]any{},
+			requestedModel: "claude-haiku-4-5",
+			expected:       true,
+		},
+		{
+			name:           "anthropic oauth empty mapping rejects non claude model",
+			platform:       PlatformAnthropic,
+			accountType:    AccountTypeOAuth,
+			credentials:    map[string]any{},
+			requestedModel: "GLM-4.5-Air",
+			expected:       false,
+		},
+		{
+			name:           "anthropic apikey empty mapping still allows all",
+			platform:       PlatformAnthropic,
+			accountType:    AccountTypeAPIKey,
+			credentials:    map[string]any{},
+			requestedModel: "GLM-4.5-Air",
 			expected:       true,
 		},
 
@@ -212,6 +245,7 @@ func TestAccountIsModelSupported(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			account := &Account{
 				Platform:    tt.platform,
+				Type:        tt.accountType,
 				Credentials: tt.credentials,
 			}
 			result := account.IsModelSupported(tt.requestedModel)

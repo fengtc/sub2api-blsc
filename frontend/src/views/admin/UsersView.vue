@@ -1732,11 +1732,14 @@ const handleScroll = () => {
   closeActionMenu()
 }
 
-onMounted(async () => {
-  await loadAttributeDefinitions()
+onMounted(() => {
   loadSavedFilters()
   loadSavedColumns()
+  const attributesPromise = loadAttributeDefinitions()
   loadUsers()
+  void attributesPromise.then(() => {
+    refreshCurrentPageSecondaryData()
+  })
   if (hasVisibleGroupsColumn.value || visibleFilters.has('group')) {
     loadAllGroups()
   }

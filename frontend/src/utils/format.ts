@@ -5,6 +5,8 @@
 
 import { i18n, getLocale } from '@/i18n'
 
+export const USD_TO_CNY_DISPLAY_RATE = 7.3
+
 /**
  * 格式化相对时间
  * @param date 日期字符串或 Date 对象
@@ -58,20 +60,40 @@ export function formatNumber(num: number | null | undefined): string {
  * @param currency 货币代码，默认 USD
  * @returns 格式化后的字符串，如 "$1.25"
  */
-export function formatCurrency(amount: number | null | undefined, currency: string = 'USD'): string {
-  if (amount === null || amount === undefined) return '$0.00'
+export function formatCurrency(
+  amount: number | null | undefined,
+  currency: string = 'USD',
+  options: { includeCnyEstimate?: boolean } = {}
+): string {
+  if (amount === null || amount === undefined) amount = 0
 
   const locale = getLocale()
 
   // For very small amounts, show more decimals
   const fractionDigits = amount > 0 && amount < 0.01 ? 6 : 2
 
-  return new Intl.NumberFormat(locale, {
+  const formatted = new Intl.NumberFormat(locale, {
     style: 'currency',
     currency: currency,
     minimumFractionDigits: fractionDigits,
     maximumFractionDigits: fractionDigits
   }).format(amount)
+
+  if (currency.toUpperCase() !== 'USD' || options.includeCnyEstimate === false) {
+    return formatted
+  }
+
+  return `${formatted} / ${formatCnyEstimate(amount)}`
+}
+
+export function formatCnyEstimate(usdAmount: number | null | undefined, fractionDigits: number = 2): string {
+  const amount = usdAmount ?? 0
+  return `¥${(amount * USD_TO_CNY_DISPLAY_RATE).toFixed(fractionDigits)}`
+}
+
+export function formatUsdWithCny(usdAmount: number | null | undefined, fractionDigits: number = 4): string {
+  const amount = usdAmount ?? 0
+  return `$${amount.toFixed(fractionDigits)} / ${formatCnyEstimate(amount)}`
 }
 
 /**

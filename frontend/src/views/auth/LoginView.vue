@@ -172,7 +172,8 @@
       </form>
     </div>
 
-    <!-- Footer -->
+    <!-- Registration link temporarily hidden. Restore this footer slot to reopen public signup. -->
+    <!--
     <template v-if="!backendModeEnabled" #footer>
       <p class="text-gray-500 dark:text-dark-400">
         {{ t('auth.dontHaveAccount') }}
@@ -184,6 +185,7 @@
         </router-link>
       </p>
     </template>
+    -->
   </AuthLayout>
 
   <!-- 2FA Modal -->

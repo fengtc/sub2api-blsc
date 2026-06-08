@@ -422,6 +422,7 @@ import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores'
 import LocaleSwitcher from '@/components/common/LocaleSwitcher.vue'
 import Icon from '@/components/icons/Icon.vue'
+import { formatUsdWithCny } from '@/utils/format'
 
 const { t, locale } = useI18n()
 const appStore = useAppStore()
@@ -829,7 +830,7 @@ const showDailyUsage = computed(() => Boolean(resultData.value && Array.isArray(
 
 function usd(value: number | null | undefined): string {
   if (value == null || value < 0) return '-'
-  return '$' + Number(value).toFixed(2)
+  return formatUsdWithCny(Number(value), 4)
 }
 
 function fmtNum(val: number | null | undefined): string {

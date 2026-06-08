@@ -54,13 +54,13 @@
         <div>
           <p class="text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('dashboard.todayCost') }}</p>
           <p class="text-xl font-bold text-gray-900 dark:text-white">
-            <span class="text-purple-600 dark:text-purple-400" :title="t('dashboard.actual')">${{ formatCost(stats?.today_actual_cost || 0) }}</span>
-            <span class="text-sm font-normal text-gray-400 dark:text-gray-500" :title="t('dashboard.standard')"> / ${{ formatCost(stats?.today_cost || 0) }}</span>
+            <span class="text-purple-600 dark:text-purple-400" :title="t('dashboard.actual')">{{ formatCost(stats?.today_actual_cost || 0) }}</span>
+            <span class="text-sm font-normal text-gray-400 dark:text-gray-500" :title="t('dashboard.standard')"> / {{ formatCost(stats?.today_cost || 0) }}</span>
           </p>
           <p class="text-xs">
             <span class="text-gray-500 dark:text-gray-400">{{ t('common.total') }}: </span>
-            <span class="text-purple-600 dark:text-purple-400" :title="t('dashboard.actual')">${{ formatCost(stats?.total_actual_cost || 0) }}</span>
-            <span class="text-gray-400 dark:text-gray-500" :title="t('dashboard.standard')"> / ${{ formatCost(stats?.total_cost || 0) }}</span>
+            <span class="text-purple-600 dark:text-purple-400" :title="t('dashboard.actual')">{{ formatCost(stats?.total_actual_cost || 0) }}</span>
+            <span class="text-gray-400 dark:text-gray-500" :title="t('dashboard.standard')"> / {{ formatCost(stats?.total_cost || 0) }}</span>
           </p>
         </div>
       </div>
@@ -156,13 +156,13 @@
             {{ item.isOther ? t('dashboard.platformOther') : platformLabel(item.platform) }}
           </span>
           <span class="font-mono text-sm text-purple-600 dark:text-purple-400" :title="t('dashboard.actual')">
-            ${{ formatCost(item.total_actual_cost) }}
+            {{ formatCost(item.total_actual_cost) }}
           </span>
         </div>
         <div class="mt-2 space-y-1 text-xs">
           <div class="flex items-center justify-between">
             <span class="text-gray-500 dark:text-gray-400">{{ t('dashboard.todayCost') }}</span>
-            <span class="font-mono text-gray-900 dark:text-white">${{ formatCost(item.today_actual_cost) }}</span>
+            <span class="font-mono text-gray-900 dark:text-white">{{ formatCost(item.today_actual_cost) }}</span>
           </div>
           <div class="flex items-center justify-between">
             <span class="text-gray-500 dark:text-gray-400">{{ t('dashboard.requests') }}</span>
@@ -228,6 +228,7 @@ import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
 import type { UserDashboardStats as UserStatsType } from '@/api/usage'
 import type { PlatformQuotaItem } from '@/types'
+import { formatUsdWithCny } from '@/utils/format'
 
 interface FusedPlatformCard {
   platform: string
@@ -381,7 +382,7 @@ const formatBalance = (b: number) =>
   }).format(b)
 
 const formatNumber = (n: number) => n.toLocaleString()
-const formatCost = (c: number) => c.toFixed(4)
+const formatCost = (c: number) => formatUsdWithCny(c, 4)
 const formatTokens = (t: number) => {
   if (t >= 1_000_000) return `${(t / 1_000_000).toFixed(1)}M`
   if (t >= 1000) return `${(t / 1000).toFixed(1)}K`

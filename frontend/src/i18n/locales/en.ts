@@ -349,6 +349,8 @@ export default {
     dashboard: 'Dashboard',
     announcements: 'Announcements',
     apiKeys: 'API Keys',
+    modelPlaza: 'Model Plaza',
+    userGuide: 'User Guide',
     usage: 'Usage',
     redeem: 'Redeem',
     affiliate: 'Affiliate Rebates',
@@ -921,6 +923,7 @@ export default {
     imageSizeUnknown: 'unknown',
     cacheRead: 'Read',
     cacheWrite: 'Write',
+    cacheReadRate: 'Cache read rate',
     serviceTier: 'Service tier',
     serviceTierPriority: 'Fast',
     serviceTierFlex: 'Flex',
@@ -1069,6 +1072,28 @@ export default {
       unitPerMillion: '/ 1M tokens',
       unitPerRequest: '/ request'
     }
+  },
+
+  modelPlaza: {
+    title: 'Model Plaza',
+    description: 'Exact model names available for requests',
+    searchPlaceholder: 'Search model, provider, or upstream name...',
+    allProviders: 'All Providers',
+    modelCount: '{count} models',
+    copyModel: 'Copy model name',
+    copied: 'Model name copied',
+    empty: 'No matching models',
+    columns: {
+      model: 'Exact Model Name',
+      provider: 'Provider',
+      endpoint: 'Endpoint',
+      upstream: 'Upstream Model'
+    }
+  },
+
+  userGuide: {
+    title: 'User Guide',
+    description: 'OIDC login, API key creation, and connectivity checks'
   },
 
   affiliate: {
@@ -4526,11 +4551,11 @@ export default {
       allTypes: 'All Types',
       inputCost: 'Input Cost',
       outputCost: 'Output Cost',
-      cacheCreationCost: 'Cache Creation Cost',
+      cacheCreationCost: 'Cache Write Cost',
       cacheReadCost: 'Cache Read Cost',
       inputTokens: 'Input Tokens',
       outputTokens: 'Output Tokens',
-      cacheCreationTokens: 'Cache Creation Tokens',
+      cacheCreationTokens: 'Cache Write Tokens',
       cacheCreation5mTokens: 'Cache Write',
       cacheCreation1hTokens: 'Cache Write',
       cacheReadTokens: 'Cache Read Tokens',

@@ -14,6 +14,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/domain"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
 )
 
 type Account struct {
@@ -617,11 +618,14 @@ func resolveRequestedModelInMapping(mapping map[string]string, requestedModel st
 	return matchWildcardMappingResult(mapping, requestedModel)
 }
 
-// IsModelSupported 检查模型是否在 model_mapping 中（支持通配符）
-// 如果未配置 mapping，返回 true（允许所有模型）
+// IsModelSupported 检查模型是否在 model_mapping 中（支持通配符）。
+// Anthropic OAuth 类账号无映射时使用内置 Claude 模型集；其他账号无映射时允许所有模型。
 func (a *Account) IsModelSupported(requestedModel string) bool {
 	mapping := a.GetModelMapping()
 	if len(mapping) == 0 {
+		if a.usesDefaultAnthropicOAuthModelSet() {
+			return isDefaultAnthropicOAuthModelSupported(requestedModel)
+		}
 		return true // 无映射 = 允许所有
 	}
 	if mappingSupportsRequestedModel(mapping, requestedModel) {
@@ -655,6 +659,32 @@ func (a *Account) ResolveMappedModel(requestedModel string) (mappedModel string,
 		}
 	}
 	return requestedModel, false
+}
+
+func (a *Account) usesDefaultAnthropicOAuthModelSet() bool {
+	if a == nil || a.Platform != PlatformAnthropic {
+		return false
+	}
+	return a.Type == AccountTypeOAuth || a.Type == AccountTypeSetupToken || a.Type == AccountTypeServiceAccount
+}
+
+func isDefaultAnthropicOAuthModelSupported(requestedModel string) bool {
+	model := strings.TrimSpace(requestedModel)
+	if model == "" {
+		return true
+	}
+	normalized := claude.NormalizeModelID(model)
+	for _, defaultModel := range claude.DefaultModels {
+		if model == defaultModel.ID || normalized == defaultModel.ID {
+			return true
+		}
+	}
+	for alias, target := range claude.ModelIDOverrides {
+		if model == alias || normalized == target {
+			return true
+		}
+	}
+	return false
 }
 
 // GetOpenAICompactMode returns the compact routing mode for an OpenAI account.

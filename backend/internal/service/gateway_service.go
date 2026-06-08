@@ -4394,6 +4394,34 @@ func enforceCacheControlLimit(body []byte) []byte {
 	return body
 }
 
+func claudeModelDisallowsTemperature(model string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(model))
+	if idx := strings.LastIndex(normalized, "/"); idx >= 0 {
+		normalized = normalized[idx+1:]
+	}
+	normalized = strings.ReplaceAll(normalized, ".", "-")
+	return strings.Contains(normalized, "claude-opus-4-7") ||
+		strings.Contains(normalized, "claude-opus-4-8")
+}
+
+func sanitizeDeprecatedClaudeSamplingParams(body []byte, modelID string) ([]byte, bool) {
+	if len(body) == 0 {
+		return body, false
+	}
+	model := strings.TrimSpace(modelID)
+	if model == "" {
+		model = gjson.GetBytes(body, "model").String()
+	}
+	if !claudeModelDisallowsTemperature(model) || !gjson.GetBytes(body, "temperature").Exists() {
+		return body, false
+	}
+	next, ok := deleteJSONPathBytes(body, "temperature")
+	if !ok {
+		return body, false
+	}
+	return next, true
+}
+
 // injectAnthropicCacheControlTTL1h 将已有 ephemeral cache_control 块的 ttl 强制写为 1h。
 // 仅修改已经存在的 cache_control，不新增缓存断点。
 func injectAnthropicCacheControlTTL1h(body []byte) []byte {
@@ -5447,6 +5475,9 @@ func (s *GatewayService) buildUpstreamRequestAnthropicAPIKeyPassthrough(
 	if sanitized, changed := sanitizeAnthropicBodyForBetaTokens(body, clientBeta); changed {
 		body = sanitized
 	}
+	if sanitized, changed := sanitizeDeprecatedClaudeSamplingParams(body, ""); changed {
+		body = sanitized
+	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, targetURL, bytes.NewReader(body))
 	if err != nil {
@@ -6311,6 +6342,9 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 	// 同步 billing header cc_version 与实际发送的 User-Agent 版本
 	if fingerprint != nil {
 		body = syncBillingHeaderVersion(body, fingerprint.UserAgent)
+	}
+	if sanitized, changed := sanitizeDeprecatedClaudeSamplingParams(body, modelID); changed {
+		body = sanitized
 	}
 
 	// === 计算最终 anthropic-beta header（先于 body sanitize 与 CCH 签名）===

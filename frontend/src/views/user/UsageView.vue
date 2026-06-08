@@ -41,17 +41,17 @@
                 <span> · </span>
                 <span>{{ t('usage.out') }} {{ formatTokens(usageStats?.total_output_tokens || 0) }}</span>
                 <span> · </span>
-                <span class="text-sky-600 dark:text-sky-400">{{ t('usage.cacheHit') }} {{ formatTokens(usageStats?.total_cache_read_tokens || 0) }}</span>
+                <span class="text-sky-600 dark:text-sky-400">{{ t('usage.cacheRead') }} {{ formatTokens(usageStats?.total_cache_read_tokens || 0) }}</span>
                 <span> · </span>
-                <span class="text-amber-600 dark:text-amber-400">{{ t('usage.cacheCreate') }} {{ formatTokens(usageStats?.total_cache_creation_tokens || 0) }}</span>
+                <span class="text-amber-600 dark:text-amber-400">{{ t('usage.cacheWrite') }} {{ formatTokens(usageStats?.total_cache_creation_tokens || 0) }}</span>
               </p>
-              <p class="text-xs text-gray-400 dark:text-gray-500">
-                {{ t('usage.cacheHitRate') }}:
+              <p class="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-xs text-gray-400 dark:text-gray-500">
+                <span>{{ t('usage.cacheReadRate') }}:</span>
                 <template v-if="cacheStats.totalInput > 0">
                   <span class="text-sky-600 dark:text-sky-400">{{ formatTokens(cacheStats.cacheRead) }}</span>
                   <span class="text-gray-400">/</span>
                   <span class="text-gray-600 dark:text-gray-300">{{ formatTokens(cacheStats.totalInput) }}</span>
-                  <span class="ml-1">{{ cacheStats.ratePercent }}</span>
+                  <span>{{ cacheStats.ratePercent }}</span>
                 </template>
                 <template v-else>-</template>
               </p>
@@ -70,11 +70,11 @@
                 {{ t('usage.totalCost') }}
               </p>
               <p class="text-xl font-bold text-green-600 dark:text-green-400">
-                ${{ (usageStats?.total_actual_cost || 0).toFixed(4) }}
+                {{ formatUsdWithCny(usageStats?.total_actual_cost || 0, 4) }}
               </p>
               <p class="text-xs text-gray-500 dark:text-gray-400">
                 {{ t('usage.actualCost') }} /
-                <span class="line-through">${{ (usageStats?.total_cost || 0).toFixed(4) }}</span>
+                <span class="line-through">{{ formatUsdWithCny(usageStats?.total_cost || 0, 4) }}</span>
                 {{ t('usage.standardCost') }}
               </p>
             </div>
@@ -314,10 +314,34 @@
             </div>
           </template>
 
+          <template #cell-cache_creation_tokens="{ row }">
+            <span class="text-sm tabular-nums text-amber-600 dark:text-amber-400">
+              {{ (row.cache_creation_tokens ?? 0).toLocaleString() }}
+            </span>
+          </template>
+
+          <template #cell-cache_read_tokens="{ row }">
+            <span class="text-sm tabular-nums text-sky-600 dark:text-sky-400">
+              {{ (row.cache_read_tokens ?? 0).toLocaleString() }}
+            </span>
+          </template>
+
+          <template #cell-cache_creation_cost="{ row }">
+            <span class="text-sm tabular-nums text-gray-700 dark:text-gray-300">
+              {{ formatUsdWithCny(row.cache_creation_cost ?? 0, 6) }}
+            </span>
+          </template>
+
+          <template #cell-cache_read_cost="{ row }">
+            <span class="text-sm tabular-nums text-gray-700 dark:text-gray-300">
+              {{ formatUsdWithCny(row.cache_read_cost ?? 0, 6) }}
+            </span>
+          </template>
+
           <template #cell-cost="{ row }">
             <div class="flex items-center gap-1.5 text-sm">
               <span class="font-medium text-green-600 dark:text-green-400">
-                ${{ (row.actual_cost ?? 0).toFixed(6) }}
+                {{ formatUsdWithCny(row.actual_cost ?? 0, 6) }}
               </span>
               <!-- Cost Detail Tooltip -->
               <div
@@ -622,7 +646,7 @@ import Icon from '@/components/icons/Icon.vue'
 import UserErrorRequestsTable from '@/components/user/UserErrorRequestsTable.vue'
 import type { UsageLog, ApiKey, UsageQueryParams, UsageStatsResponse, UserErrorRequest } from '@/types'
 import type { Column } from '@/components/common/types'
-import { formatDateTime, formatReasoningEffort } from '@/utils/format'
+import { formatDateTime, formatReasoningEffort, formatUsdWithCny } from '@/utils/format'
 import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
 import { formatCacheTokens, formatMultiplier } from '@/utils/formatters'
 import { formatTokenPricePerMillion } from '@/utils/usagePricing'
@@ -686,6 +710,10 @@ const columns = computed<Column[]>(() => [
   { key: 'stream', label: t('usage.type'), sortable: false },
   { key: 'billing_mode', label: t('admin.usage.billingMode'), sortable: false },
   { key: 'tokens', label: t('usage.tokens'), sortable: false },
+  { key: 'cache_creation_tokens', label: t('admin.usage.cacheCreationTokens'), sortable: false },
+  { key: 'cache_read_tokens', label: t('admin.usage.cacheReadTokens'), sortable: false },
+  { key: 'cache_creation_cost', label: t('admin.usage.cacheCreationCost'), sortable: false },
+  { key: 'cache_read_cost', label: t('admin.usage.cacheReadCost'), sortable: false },
   { key: 'cost', label: t('usage.cost'), sortable: false },
   { key: 'first_token', label: t('usage.firstToken'), sortable: false },
   { key: 'duration', label: t('usage.duration'), sortable: false },
@@ -984,6 +1012,8 @@ const exportToCSV = async () => {
       'Output Tokens',
       'Cache Read Tokens',
       'Cache Creation Tokens',
+      'Cache Read Cost',
+      'Cache Creation Cost',
       'Rate Multiplier',
       'Billed Cost',
       'Original Cost',
@@ -1003,6 +1033,8 @@ const exportToCSV = async () => {
         log.output_tokens,
         log.cache_read_tokens,
         log.cache_creation_tokens,
+        (log.cache_read_cost ?? 0).toFixed(8),
+        (log.cache_creation_cost ?? 0).toFixed(8),
         log.rate_multiplier,
         (log.actual_cost ?? 0).toFixed(8),
         (log.total_cost ?? 0).toFixed(8),

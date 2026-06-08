@@ -139,13 +139,13 @@
               <div class="flex items-center gap-1.5">
                 <span class="text-gray-500 dark:text-gray-400">{{ t('keys.today') }}:</span>
                 <span class="font-medium text-gray-900 dark:text-white">
-                  ${{ (usageStats[row.id]?.today_actual_cost ?? 0).toFixed(4) }}
+                  {{ formatUsdWithCny(usageStats[row.id]?.today_actual_cost ?? 0, 4) }}
                 </span>
               </div>
               <div class="mt-0.5 flex items-center gap-1.5">
                 <span class="text-gray-500 dark:text-gray-400">{{ t('keys.total') }}:</span>
                 <span class="font-medium text-gray-900 dark:text-white">
-                  ${{ (usageStats[row.id]?.total_actual_cost ?? 0).toFixed(4) }}
+                  {{ formatUsdWithCny(usageStats[row.id]?.total_actual_cost ?? 0, 4) }}
                 </span>
               </div>
               <!-- Quota progress (if quota is set) -->
@@ -1071,7 +1071,7 @@ import TablePageLayout from '@/components/layout/TablePageLayout.vue'
 	import type { ApiKey, Group, PublicSettings, SubscriptionType, GroupPlatform } from '@/types'
 import type { Column } from '@/components/common/types'
 import type { BatchApiKeyUsageStats } from '@/api/usage'
-import { formatDateTime } from '@/utils/format'
+import { formatDateTime, formatUsdWithCny } from '@/utils/format'
 import { maskApiKey } from '@/utils/maskApiKey'
 import {
   buildCcSwitchImportDeeplink,
@@ -1310,18 +1310,25 @@ const loadApiKeys = async () => {
     pagination.value.total = response.total
     pagination.value.pages = response.pages
 
-    // Load usage stats for all API keys in the list
+    usageStats.value = {}
+
+    // Defer usage stats so the key list can render first.
     if (response.items.length > 0) {
       const keyIds = response.items.map((k) => k.id)
-      try {
-        const usageResponse = await usageAPI.getDashboardApiKeysUsage(keyIds, { signal })
+      window.setTimeout(() => {
         if (signal.aborted) return
-        usageStats.value = usageResponse.stats
-      } catch (e) {
-        if (!isAbortError(e)) {
-          console.error('Failed to load usage stats:', e)
-        }
-      }
+        void (async () => {
+          try {
+            const usageResponse = await usageAPI.getDashboardApiKeysUsage(keyIds, { signal })
+            if (signal.aborted) return
+            usageStats.value = usageResponse.stats
+          } catch (e) {
+            if (!isAbortError(e)) {
+              console.error('Failed to load usage stats:', e)
+            }
+          }
+        })()
+      }, 50)
     }
   } catch (error) {
     if (isAbortError(error)) {

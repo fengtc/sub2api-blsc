@@ -349,6 +349,8 @@ export default {
     dashboard: '仪表盘',
     announcements: '公告',
     apiKeys: 'API 密钥',
+    modelPlaza: '模型广场',
+    userGuide: '使用文档',
     usage: '使用记录',
     redeem: '兑换',
     affiliate: '邀请返利',
@@ -925,6 +927,7 @@ export default {
     imageSizeUnknown: '未知',
     cacheRead: '读取',
     cacheWrite: '写入',
+    cacheReadRate: '缓存读取率',
     serviceTier: '服务档位',
     serviceTierPriority: 'Fast',
     serviceTierFlex: 'Flex',
@@ -1073,6 +1076,28 @@ export default {
       unitPerMillion: '/ 1M token',
       unitPerRequest: '/ 次'
     }
+  },
+
+  modelPlaza: {
+    title: '模型广场',
+    description: '查看可直接填写的模型名称',
+    searchPlaceholder: '搜索模型、厂家或上游名称...',
+    allProviders: '全部厂家',
+    modelCount: '共 {count} 个模型',
+    copyModel: '复制模型名',
+    copied: '模型名已复制',
+    empty: '没有匹配的模型',
+    columns: {
+      model: '精确模型名',
+      provider: '厂家',
+      endpoint: '接口',
+      upstream: '上游模型'
+    }
+  },
+
+  userGuide: {
+    title: '使用文档',
+    description: 'OIDC 登录、API Key 创建和接口连通验证说明'
   },
 
   affiliate: {
@@ -4679,11 +4704,11 @@ export default {
       allTypes: '全部类型',
       inputCost: '输入成本',
       outputCost: '输出成本',
-      cacheCreationCost: '缓存创建成本',
-      cacheReadCost: '缓存读取成本',
+      cacheCreationCost: '缓存写入费用',
+      cacheReadCost: '缓存读取费用',
       inputTokens: '输入 Token',
       outputTokens: '输出 Token',
-      cacheCreationTokens: '缓存创建 Token',
+      cacheCreationTokens: '缓存写入',
       cacheCreation5mTokens: '缓存创建',
       cacheCreation1hTokens: '缓存创建',
       cacheReadTokens: '缓存读取 Token',
