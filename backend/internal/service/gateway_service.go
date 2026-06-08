@@ -5475,6 +5475,9 @@ func (s *GatewayService) buildUpstreamRequestAnthropicAPIKeyPassthrough(
 	if sanitized, changed := sanitizeAnthropicBodyForBetaTokens(body, clientBeta); changed {
 		body = sanitized
 	}
+	if sanitized, changed := SanitizeMalformedThinkingBlocks(body); changed {
+		body = sanitized
+	}
 	if sanitized, changed := sanitizeDeprecatedClaudeSamplingParams(body, ""); changed {
 		body = sanitized
 	}
@@ -6346,6 +6349,9 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 	if sanitized, changed := sanitizeDeprecatedClaudeSamplingParams(body, modelID); changed {
 		body = sanitized
 	}
+	if sanitized, changed := SanitizeMalformedThinkingBlocks(body); changed {
+		body = sanitized
+	}
 
 	// === 计算最终 anthropic-beta header（先于 body sanitize 与 CCH 签名）===
 	//
@@ -6486,6 +6492,9 @@ func (s *GatewayService) buildUpstreamRequestAnthropicVertex(
 		if sanitized, changed := sanitizeAnthropicBodyForBetaTokens(vertexBody, clientBeta); changed {
 			vertexBody = sanitized
 		}
+	}
+	if sanitized, changed := SanitizeMalformedThinkingBlocks(vertexBody); changed {
+		vertexBody = sanitized
 	}
 	fullURL, err := buildVertexAnthropicURL(account.VertexProjectID(), account.VertexLocation(modelID), modelID, reqStream)
 	if err != nil {
@@ -9735,6 +9744,9 @@ func (s *GatewayService) buildCountTokensRequestAnthropicAPIKeyPassthrough(
 	if sanitized, changed := sanitizeAnthropicBodyForBetaTokens(body, clientBeta); changed {
 		body = sanitized
 	}
+	if sanitized, changed := SanitizeMalformedThinkingBlocks(body); changed {
+		body = sanitized
+	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, targetURL, bytes.NewReader(body))
 	if err != nil {
@@ -9825,6 +9837,9 @@ func (s *GatewayService) buildCountTokensRequest(ctx context.Context, c *gin.Con
 	// 同步 billing header cc_version 与实际发送的 User-Agent 版本
 	if ctFingerprint != nil && ctEnableFP {
 		body = syncBillingHeaderVersion(body, ctFingerprint.UserAgent)
+	}
+	if sanitized, changed := SanitizeMalformedThinkingBlocks(body); changed {
+		body = sanitized
 	}
 
 	// === 计算最终 anthropic-beta header（先于 body sanitize 与 CCH 签名）===

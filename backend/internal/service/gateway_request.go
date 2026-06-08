@@ -514,6 +514,50 @@ func FilterThinkingBlocks(body []byte) []byte {
 	return filterThinkingBlocksInternal(body, false)
 }
 
+// SanitizeMalformedThinkingBlocks proactively removes malformed historical thinking blocks.
+//
+// Some clients replay assistant history from a different model/provider and include
+// {"type":"thinking"} blocks with an empty or missing "thinking" field. Anthropic rejects
+// those before generation with:
+// "each thinking block must contain thinking".
+func SanitizeMalformedThinkingBlocks(body []byte) ([]byte, bool) {
+	if !bytes.Contains(body, []byte("thinking")) {
+		return body, false
+	}
+
+	jsonStr := *(*string)(unsafe.Pointer(&body))
+	msgsRes := gjson.Get(jsonStr, "messages")
+	if !msgsRes.Exists() || !msgsRes.IsArray() {
+		return body, false
+	}
+
+	malformed := false
+	msgsRes.ForEach(func(_, msg gjson.Result) bool {
+		content := msg.Get("content")
+		if !content.Exists() || !content.IsArray() {
+			return true
+		}
+		content.ForEach(func(_, block gjson.Result) bool {
+			if block.Get("type").String() != "thinking" {
+				return true
+			}
+			thinking := block.Get("thinking")
+			if !thinking.Exists() || strings.TrimSpace(thinking.String()) == "" {
+				malformed = true
+				return false
+			}
+			return true
+		})
+		return !malformed
+	})
+	if !malformed {
+		return body, false
+	}
+
+	out := FilterThinkingBlocksForRetry(body)
+	return out, !bytes.Equal(out, body)
+}
+
 // FilterThinkingBlocksForRetry strips thinking-related constructs for retry scenarios.
 //
 // Why:
@@ -646,7 +690,7 @@ func FilterThinkingBlocksForRetry(body []byte) []byte {
 				modifiedThisMsg = true
 				ensureNewContent(bi)
 				thinkingText, _ := blockMap["thinking"].(string)
-				if thinkingText != "" {
+				if strings.TrimSpace(thinkingText) != "" {
 					newContent = append(newContent, map[string]any{"type": "text", "text": thinkingText})
 				}
 				continue
@@ -663,7 +707,7 @@ func FilterThinkingBlocksForRetry(body []byte) []byte {
 					ensureNewContent(bi)
 					switch v := rawThinking.(type) {
 					case string:
-						if v != "" {
+						if strings.TrimSpace(v) != "" {
 							newContent = append(newContent, map[string]any{"type": "text", "text": v})
 						}
 					default:
