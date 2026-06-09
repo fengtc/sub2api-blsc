@@ -376,6 +376,15 @@ func (s *UsageService) ListWithFilters(ctx context.Context, params pagination.Pa
 	return logs, result, nil
 }
 
+// ListExternalUsageLogs returns denormalized usage logs for external read-only integrations.
+func (s *UsageService) ListExternalUsageLogs(ctx context.Context, params pagination.PaginationParams, filters ExternalUsageLogFilters) ([]ExternalUsageLog, *pagination.PaginationResult, *ExternalUsageLogTotals, error) {
+	logs, result, totals, err := s.usageRepo.ListExternalUsageLogs(ctx, params, filters)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("list external usage logs: %w", err)
+	}
+	return logs, result, totals, nil
+}
+
 // GetGlobalStats returns global usage stats for a time range.
 func (s *UsageService) GetGlobalStats(ctx context.Context, startTime, endTime time.Time) (*usagestats.UsageStats, error) {
 	stats, err := s.usageRepo.GetGlobalStats(ctx, startTime, endTime)

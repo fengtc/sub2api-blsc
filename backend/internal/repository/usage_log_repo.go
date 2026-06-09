@@ -2843,6 +2843,254 @@ func (r *usageLogRepository) ListWithFilters(ctx context.Context, params paginat
 	return logs, page, nil
 }
 
+func (r *usageLogRepository) ListExternalUsageLogs(ctx context.Context, params pagination.PaginationParams, filters service.ExternalUsageLogFilters) ([]service.ExternalUsageLog, *pagination.PaginationResult, *service.ExternalUsageLogTotals, error) {
+	conditions := make([]string, 0, 8)
+	args := make([]any, 0, 8)
+
+	if filters.UserID > 0 {
+		conditions = append(conditions, fmt.Sprintf("ul.user_id = $%d", len(args)+1))
+		args = append(args, filters.UserID)
+	}
+	if filters.APIKeyID > 0 {
+		conditions = append(conditions, fmt.Sprintf("ul.api_key_id = $%d", len(args)+1))
+		args = append(args, filters.APIKeyID)
+	}
+	if filters.AccountID > 0 {
+		conditions = append(conditions, fmt.Sprintf("ul.account_id = $%d", len(args)+1))
+		args = append(args, filters.AccountID)
+	}
+	if filters.GroupID > 0 {
+		conditions = append(conditions, fmt.Sprintf("ul.group_id = $%d", len(args)+1))
+		args = append(args, filters.GroupID)
+	}
+	if model := strings.TrimSpace(filters.Model); model != "" {
+		conditions = append(conditions, fmt.Sprintf("(ul.model = $%d OR ul.requested_model = $%d OR ul.upstream_model = $%d)", len(args)+1, len(args)+1, len(args)+1))
+		args = append(args, model)
+	}
+	if filters.StartTime != nil {
+		conditions = append(conditions, fmt.Sprintf("ul.created_at >= $%d", len(args)+1))
+		args = append(args, *filters.StartTime)
+	}
+	if filters.EndTime != nil {
+		conditions = append(conditions, fmt.Sprintf("ul.created_at < $%d", len(args)+1))
+		args = append(args, *filters.EndTime)
+	}
+
+	whereClause := ""
+	if len(conditions) > 0 {
+		whereClause = "WHERE " + strings.Join(conditions, " AND ")
+	}
+
+	countQuery := `SELECT COUNT(*) FROM usage_logs ul ` + whereClause
+	var total int64
+	if err := scanSingleRow(ctx, r.sql, countQuery, args, &total); err != nil {
+		return nil, nil, nil, err
+	}
+
+	totalsQuery := `
+		SELECT
+			COUNT(*) AS requests,
+			COALESCE(SUM(ul.input_tokens), 0),
+			COALESCE(SUM(ul.output_tokens), 0),
+			COALESCE(SUM(ul.cache_creation_tokens), 0),
+			COALESCE(SUM(ul.cache_read_tokens), 0),
+			COALESCE(SUM(ul.image_output_tokens), 0),
+			COALESCE(SUM(ul.input_tokens + ul.output_tokens + ul.cache_creation_tokens + ul.cache_read_tokens + ul.image_output_tokens), 0),
+			COALESCE(SUM(ul.total_cost), 0),
+			COALESCE(SUM(ul.actual_cost), 0)
+		FROM usage_logs ul
+		` + whereClause
+	totals := &service.ExternalUsageLogTotals{}
+	if err := scanSingleRow(ctx, r.sql, totalsQuery, args,
+		&totals.Requests,
+		&totals.InputTokens,
+		&totals.OutputTokens,
+		&totals.CacheCreationTokens,
+		&totals.CacheReadTokens,
+		&totals.ImageOutputTokens,
+		&totals.TotalTokens,
+		&totals.TotalCost,
+		&totals.ActualCost,
+	); err != nil {
+		return nil, nil, nil, err
+	}
+
+	page := params.Page
+	if page < 1 {
+		page = 1
+	}
+	pageSize := params.Limit()
+	pages := int((total + int64(pageSize) - 1) / int64(pageSize))
+	if pages < 1 {
+		pages = 1
+	}
+	pageResult := &pagination.PaginationResult{
+		Total:    total,
+		Page:     page,
+		PageSize: pageSize,
+		Pages:    pages,
+	}
+
+	sortOrder := params.NormalizedSortOrder(pagination.SortOrderDesc)
+	orderBy := "ul.created_at DESC, ul.id DESC"
+	if sortOrder == pagination.SortOrderAsc {
+		orderBy = "ul.created_at ASC, ul.id ASC"
+	}
+
+	rowArgs := append([]any(nil), args...)
+	limitPos := len(rowArgs) + 1
+	rowArgs = append(rowArgs, pageSize)
+	offsetPos := len(rowArgs) + 1
+	rowArgs = append(rowArgs, (page-1)*pageSize)
+
+	query := fmt.Sprintf(`
+		SELECT
+			ul.id,
+			ul.created_at,
+			ul.user_id,
+			COALESCE(u.email, ''),
+			COALESCE(u.username, ''),
+			ul.api_key_id,
+			COALESCE(ak.name, ''),
+			ul.account_id,
+			COALESCE(a.name, ''),
+			COALESCE(a.platform, COALESCE(g.platform, '')),
+			ul.group_id,
+			g.name,
+			COALESCE(ul.request_id, ''),
+			ul.model,
+			COALESCE(NULLIF(ul.requested_model, ''), ul.model),
+			ul.upstream_model,
+			ul.model_mapping_chain,
+			ul.input_tokens,
+			ul.output_tokens,
+			ul.cache_creation_tokens,
+			ul.cache_read_tokens,
+			ul.image_output_tokens,
+			ul.input_tokens + ul.output_tokens + ul.cache_creation_tokens + ul.cache_read_tokens + ul.image_output_tokens AS total_tokens,
+			ul.input_cost,
+			ul.output_cost,
+			ul.cache_creation_cost,
+			ul.cache_read_cost,
+			ul.image_output_cost,
+			ul.total_cost,
+			ul.actual_cost,
+			ul.request_type,
+			ul.stream,
+			ul.duration_ms,
+			ul.first_token_ms,
+			ul.inbound_endpoint,
+			ul.upstream_endpoint
+		FROM usage_logs ul
+		LEFT JOIN users u ON u.id = ul.user_id
+		LEFT JOIN api_keys ak ON ak.id = ul.api_key_id
+		LEFT JOIN accounts a ON a.id = ul.account_id
+		LEFT JOIN groups g ON g.id = ul.group_id
+		%s
+		ORDER BY %s
+		LIMIT $%d OFFSET $%d
+	`, whereClause, orderBy, limitPos, offsetPos)
+
+	rows, err := r.sql.QueryContext(ctx, query, rowArgs...)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	defer rows.Close()
+
+	out := make([]service.ExternalUsageLog, 0, pageSize)
+	for rows.Next() {
+		var item service.ExternalUsageLog
+		var groupID sql.NullInt64
+		var groupName sql.NullString
+		var upstreamModel sql.NullString
+		var mappingChain sql.NullString
+		var durationMs sql.NullInt64
+		var firstTokenMs sql.NullInt64
+		var inboundEndpoint sql.NullString
+		var upstreamEndpoint sql.NullString
+		var requestType int16
+		if err := rows.Scan(
+			&item.ID,
+			&item.CreatedAt,
+			&item.UserID,
+			&item.Email,
+			&item.Username,
+			&item.APIKeyID,
+			&item.APIKeyName,
+			&item.AccountID,
+			&item.AccountName,
+			&item.Platform,
+			&groupID,
+			&groupName,
+			&item.RequestID,
+			&item.Model,
+			&item.RequestedModel,
+			&upstreamModel,
+			&mappingChain,
+			&item.InputTokens,
+			&item.OutputTokens,
+			&item.CacheCreationTokens,
+			&item.CacheReadTokens,
+			&item.ImageOutputTokens,
+			&item.TotalTokens,
+			&item.InputCost,
+			&item.OutputCost,
+			&item.CacheCreationCost,
+			&item.CacheReadCost,
+			&item.ImageOutputCost,
+			&item.TotalCost,
+			&item.ActualCost,
+			&requestType,
+			&item.Stream,
+			&durationMs,
+			&firstTokenMs,
+			&inboundEndpoint,
+			&upstreamEndpoint,
+		); err != nil {
+			return nil, nil, nil, err
+		}
+		if groupID.Valid {
+			v := groupID.Int64
+			item.GroupID = &v
+		}
+		if groupName.Valid {
+			v := groupName.String
+			item.GroupName = &v
+		}
+		if upstreamModel.Valid {
+			v := upstreamModel.String
+			item.UpstreamModel = &v
+		}
+		if mappingChain.Valid {
+			v := mappingChain.String
+			item.ModelMappingChain = &v
+		}
+		if durationMs.Valid {
+			v := int(durationMs.Int64)
+			item.DurationMs = &v
+		}
+		if firstTokenMs.Valid {
+			v := int(firstTokenMs.Int64)
+			item.FirstTokenMs = &v
+		}
+		if inboundEndpoint.Valid {
+			v := inboundEndpoint.String
+			item.InboundEndpoint = &v
+		}
+		if upstreamEndpoint.Valid {
+			v := upstreamEndpoint.String
+			item.UpstreamEndpoint = &v
+		}
+		item.RequestType = service.RequestTypeFromInt16(requestType).String()
+		out = append(out, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, nil, nil, err
+	}
+
+	return out, pageResult, totals, nil
+}
+
 func shouldUseFastUsageLogTotal(filters UsageLogFilters) bool {
 	if filters.ExactTotal {
 		return false

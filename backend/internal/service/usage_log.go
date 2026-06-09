@@ -91,6 +91,79 @@ func ApplyLegacyRequestFields(requestType RequestType, fallbackStream bool, fall
 	}
 }
 
+// ExternalUsageLogFilters defines filters for external read-only usage export APIs.
+type ExternalUsageLogFilters struct {
+	StartTime *time.Time
+	EndTime   *time.Time
+
+	UserID    int64
+	APIKeyID  int64
+	AccountID int64
+	GroupID   int64
+	Model     string
+}
+
+// ExternalUsageLog is a denormalized usage row for external systems.
+type ExternalUsageLog struct {
+	ID        int64     `json:"id"`
+	CreatedAt time.Time `json:"created_at"`
+
+	UserID   int64  `json:"user_id"`
+	Email    string `json:"email"`
+	Username string `json:"username"`
+
+	APIKeyID   int64  `json:"api_key_id"`
+	APIKeyName string `json:"api_key_name"`
+
+	AccountID   int64  `json:"account_id"`
+	AccountName string `json:"account_name"`
+	Platform    string `json:"platform"`
+
+	GroupID   *int64  `json:"group_id,omitempty"`
+	GroupName *string `json:"group_name,omitempty"`
+
+	RequestID         string  `json:"request_id,omitempty"`
+	Model             string  `json:"model"`
+	RequestedModel    string  `json:"requested_model"`
+	UpstreamModel     *string `json:"upstream_model,omitempty"`
+	ModelMappingChain *string `json:"model_mapping_chain,omitempty"`
+
+	InputTokens         int `json:"input_tokens"`
+	OutputTokens        int `json:"output_tokens"`
+	CacheCreationTokens int `json:"cache_creation_tokens"`
+	CacheReadTokens     int `json:"cache_read_tokens"`
+	ImageOutputTokens   int `json:"image_output_tokens"`
+	TotalTokens         int `json:"total_tokens"`
+
+	InputCost         float64 `json:"input_cost"`
+	OutputCost        float64 `json:"output_cost"`
+	CacheCreationCost float64 `json:"cache_creation_cost"`
+	CacheReadCost     float64 `json:"cache_read_cost"`
+	ImageOutputCost   float64 `json:"image_output_cost"`
+	TotalCost         float64 `json:"total_cost"`
+	ActualCost        float64 `json:"actual_cost"`
+
+	RequestType      string  `json:"request_type"`
+	Stream           bool    `json:"stream"`
+	DurationMs       *int    `json:"duration_ms,omitempty"`
+	FirstTokenMs     *int    `json:"first_token_ms,omitempty"`
+	InboundEndpoint  *string `json:"inbound_endpoint,omitempty"`
+	UpstreamEndpoint *string `json:"upstream_endpoint,omitempty"`
+}
+
+// ExternalUsageLogTotals summarizes an external usage export query.
+type ExternalUsageLogTotals struct {
+	Requests            int64   `json:"requests"`
+	InputTokens         int64   `json:"input_tokens"`
+	OutputTokens        int64   `json:"output_tokens"`
+	CacheCreationTokens int64   `json:"cache_creation_tokens"`
+	CacheReadTokens     int64   `json:"cache_read_tokens"`
+	ImageOutputTokens   int64   `json:"image_output_tokens"`
+	TotalTokens         int64   `json:"total_tokens"`
+	TotalCost           float64 `json:"total_cost"`
+	ActualCost          float64 `json:"actual_cost"`
+}
+
 type UsageLog struct {
 	ID        int64
 	UserID    int64
