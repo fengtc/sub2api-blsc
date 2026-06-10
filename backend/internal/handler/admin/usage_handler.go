@@ -59,9 +59,19 @@ type CreateUsageCleanupTaskRequest struct {
 }
 
 type ExternalUsageLogsResponse struct {
-	Items      []service.ExternalUsageLog        `json:"items"`
+	Items      []ExternalUsageLogItem            `json:"items"`
 	Totals     *service.ExternalUsageLogTotals   `json:"totals"`
 	Pagination ExternalUsageLogsPaginationResult `json:"pagination"`
+}
+
+type ExternalUsageLogItem struct {
+	CreatedAt     time.Time `json:"created_at"`
+	Email         string    `json:"email"`
+	Username      string    `json:"username"`
+	UpstreamModel string    `json:"upstream_model"`
+	TotalTokens   int       `json:"total_tokens"`
+	ActualCost    float64   `json:"actual_cost"`
+	Remark        string    `json:"remark"`
 }
 
 type ExternalUsageLogsPaginationResult struct {
@@ -288,7 +298,7 @@ func (h *UsageHandler) ExternalLogs(c *gin.Context) {
 		return
 	}
 	response.Success(c, ExternalUsageLogsResponse{
-		Items:  items,
+		Items:  toExternalUsageLogItems(items),
 		Totals: totals,
 		Pagination: ExternalUsageLogsPaginationResult{
 			Total:    pageResult.Total,
@@ -297,6 +307,29 @@ func (h *UsageHandler) ExternalLogs(c *gin.Context) {
 			Pages:    pageResult.Pages,
 		},
 	})
+}
+
+func toExternalUsageLogItems(logs []service.ExternalUsageLog) []ExternalUsageLogItem {
+	items := make([]ExternalUsageLogItem, 0, len(logs))
+	for _, log := range logs {
+		upstreamModel := log.Model
+		if log.RequestedModel != "" {
+			upstreamModel = log.RequestedModel
+		}
+		if log.UpstreamModel != nil && strings.TrimSpace(*log.UpstreamModel) != "" {
+			upstreamModel = *log.UpstreamModel
+		}
+		items = append(items, ExternalUsageLogItem{
+			CreatedAt:     log.CreatedAt,
+			Email:         log.Email,
+			Username:      log.Username,
+			UpstreamModel: upstreamModel,
+			TotalTokens:   log.TotalTokens,
+			ActualCost:    log.ActualCost,
+			Remark:        log.Remark,
+		})
+	}
+	return items
 }
 
 func parseExternalUsageTime(rawTime, rawDate, userTZ string, endOfDate bool) (*time.Time, error) {

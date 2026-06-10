@@ -111,6 +111,7 @@ type ExternalUsageLog struct {
 	UserID   int64  `json:"user_id"`
 	Email    string `json:"email"`
 	Username string `json:"username"`
+	Remark   string `json:"remark"`
 
 	APIKeyID   int64  `json:"api_key_id"`
 	APIKeyName string `json:"api_key_name"`
