@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="AI Gateway">
+  <defs>
+    <linearGradient id="markGradient" x1="20" y1="16" x2="108" y2="112" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#14B8A6"/>
+      <stop offset="0.48" stop-color="#2563EB"/>
+      <stop offset="1" stop-color="#7C3AED"/>
+    </linearGradient>
+  </defs>
+  <rect width="128" height="128" rx="28" fill="#0F172A"/>
+  <path
+    d="M34 70c0-18.8 15.2-34 34-34h25a7 7 0 0 1 0 14H68c-11 0-20 9-20 20s9 20 20 20h25a7 7 0 0 1 0 14H68c-18.8 0-34-15.2-34-34Z"
+    fill="url(#markGradient)"
+  />
+  <path
+    d="M34 58h30c6.6 0 12 5.4 12 12s-5.4 12-12 12H34"
+    fill="none"
+    stroke="#F8FAFC"
+    stroke-width="14"
+    stroke-linecap="round"
+  />
+  <circle cx="94" cy="64" r="8" fill="#F8FAFC"/>
+</svg>
