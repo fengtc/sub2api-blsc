@@ -6749,7 +6749,7 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 	if sanitized, changed := sanitizeDeprecatedClaudeSamplingParams(body, modelID); changed {
 		body = sanitized
 	}
-	if sanitized, changed := SanitizeHistoricalThinkingBlocks(body); changed {
+	if sanitized, changed := SanitizeHistoricalThinkingBlocks(body, modelID); changed {
 		body = sanitized
 	}
 
@@ -6893,7 +6893,7 @@ func (s *GatewayService) buildUpstreamRequestAnthropicVertex(
 			vertexBody = sanitized
 		}
 	}
-	if sanitized, changed := SanitizeHistoricalThinkingBlocks(vertexBody); changed {
+	if sanitized, changed := SanitizeHistoricalThinkingBlocks(vertexBody, modelID); changed {
 		vertexBody = sanitized
 	}
 	fullURL, err := buildVertexAnthropicURL(account.VertexProjectID(), account.VertexLocation(modelID), modelID, reqStream)

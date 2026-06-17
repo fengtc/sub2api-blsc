@@ -541,12 +541,23 @@ func FilterThinkingBlocks(body []byte, mappedModel string) []byte {
 // thinking blocks whose signatures cannot be validated by the target Anthropic
 // upstream. The proxy cannot verify those signatures locally, so the only reliable
 // way to avoid upstream 400s is to strip/downgrade historical thinking before send.
-func SanitizeHistoricalThinkingBlocks(body []byte) ([]byte, bool) {
+func SanitizeHistoricalThinkingBlocks(body []byte, mappedModel ...string) ([]byte, bool) {
 	if !bytes.Contains(body, []byte("thinking")) {
 		return body, false
 	}
 
 	jsonStr := *(*string)(unsafe.Pointer(&body))
+	modelID := ""
+	if len(mappedModel) > 0 {
+		modelID = mappedModel[0]
+	}
+	if modelID == "" {
+		modelID = gjson.Get(jsonStr, "model").String()
+	}
+	if modelID == "" {
+		modelID = "claude-unknown"
+	}
+
 	msgsRes := gjson.Get(jsonStr, "messages")
 	if !msgsRes.Exists() || !msgsRes.IsArray() {
 		return body, false
@@ -572,7 +583,7 @@ func SanitizeHistoricalThinkingBlocks(body []byte) ([]byte, bool) {
 		return body, false
 	}
 
-	out := FilterThinkingBlocksForRetry(body)
+	out := FilterThinkingBlocksForRetry(body, modelID)
 	return out, !bytes.Equal(out, body)
 }
 
