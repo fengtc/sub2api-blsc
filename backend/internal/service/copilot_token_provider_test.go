@@ -2,29 +2,11 @@ package service
 
 import (
 	"context"
-	"net/http"
-	"net/http/httptest"
 	"testing"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/copilot"
 )
-
-// mockCopilotTokenServer creates a test server that returns a valid Copilot token.
-func mockCopilotTokenServer(t *testing.T) *httptest.Server {
-	t.Helper()
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		auth := r.Header.Get("Authorization")
-		if auth != "token ghp_valid" {
-			w.WriteHeader(http.StatusUnauthorized)
-			w.Write([]byte(`{"message":"Bad credentials"}`))
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"token":"copilot-test-token","expires_at":` +
-			`2000000000,"refresh_in":1500}`))
-	}))
-}
 
 func TestCopilotTokenProvider_GetAccessToken(t *testing.T) {
 	provider := NewCopilotTokenProvider(nil)

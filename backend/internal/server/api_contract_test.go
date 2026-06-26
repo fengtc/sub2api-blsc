@@ -2532,6 +2532,10 @@ func (r *stubUsageLogRepo) ListWithFilters(ctx context.Context, params paginatio
 	return out, paginationResult(total, params), nil
 }
 
+func (r *stubUsageLogRepo) ListExternalUsageLogs(ctx context.Context, params pagination.PaginationParams, filters service.ExternalUsageLogFilters) ([]service.ExternalUsageLog, *pagination.PaginationResult, *service.ExternalUsageLogTotals, error) {
+	return nil, paginationResult(0, params), &service.ExternalUsageLogTotals{}, nil
+}
+
 func (r *stubUsageLogRepo) GetGlobalStats(ctx context.Context, startTime, endTime time.Time) (*usagestats.UsageStats, error) {
 	return nil, errors.New("not implemented")
 }

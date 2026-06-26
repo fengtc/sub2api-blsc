@@ -137,7 +137,7 @@ func (s *CopilotGatewayService) handleStreamingResponse(
 	resp *http.Response,
 	model string,
 ) (*CopilotForwardResult, error) {
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	c.Header("Content-Type", "text/event-stream")
 	c.Header("Cache-Control", "no-cache")
@@ -186,7 +186,7 @@ func (s *CopilotGatewayService) handleNonStreamingResponse(
 	resp *http.Response,
 	model string,
 ) (*CopilotForwardResult, error) {
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -217,7 +217,7 @@ func (s *CopilotGatewayService) handleErrorResponse(
 	resp *http.Response,
 	account *Account,
 ) (*CopilotForwardResult, error) {
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, _ := io.ReadAll(resp.Body)
 
@@ -257,20 +257,15 @@ func (s *CopilotGatewayService) applyModelMapping(body []byte, account *Account)
 	mappedModel := account.GetMappedModel(originalModel)
 
 	if mappedModel != originalModel {
-		// Replace model in request body
-		newBody, err := json.Marshal(map[string]json.RawMessage{})
-		if err == nil {
-			// Simple approach: replace model field in the JSON
-			var raw map[string]json.RawMessage
-			if err := json.Unmarshal(body, &raw); err == nil {
-				modelBytes, _ := json.Marshal(mappedModel)
+		// Simple approach: replace model field in the JSON.
+		var raw map[string]json.RawMessage
+		if err := json.Unmarshal(body, &raw); err == nil {
+			modelBytes, err := json.Marshal(mappedModel)
+			if err == nil {
 				raw["model"] = modelBytes
 				if replaced, err := json.Marshal(raw); err == nil {
-					newBody = replaced
-					slog.Debug("copilot model mapping",
-						"original", originalModel,
-						"mapped", mappedModel)
-					return newBody, originalModel
+					slog.Debug("copilot model mapping", "original", originalModel, "mapped", mappedModel)
+					return replaced, originalModel
 				}
 			}
 		}
@@ -349,7 +344,7 @@ func (s *CopilotGatewayService) ListModels(
 	if err != nil {
 		return nil, fmt.Errorf("copilot: models request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -468,7 +463,7 @@ func (s *CopilotGatewayService) handleMessagesNonStreamingResponse(
 	resp *http.Response,
 	model string,
 ) (*CopilotForwardResult, error) {
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -502,7 +497,7 @@ func (s *CopilotGatewayService) handleMessagesStreamingResponse(
 	resp *http.Response,
 	model string,
 ) (*CopilotForwardResult, error) {
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	c.Header("Content-Type", "text/event-stream")
 	c.Header("Cache-Control", "no-cache")
@@ -641,7 +636,7 @@ func (s *CopilotGatewayService) FetchQuota(
 	if err != nil {
 		return nil, fmt.Errorf("copilot: quota request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {

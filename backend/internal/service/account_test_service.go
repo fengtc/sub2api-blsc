@@ -1067,7 +1067,7 @@ func (s *AccountTestService) testCopilotAccountConnection(c *gin.Context, accoun
 	if err != nil {
 		return s.sendErrorAndEnd(c, fmt.Sprintf("Copilot API request failed: %s", err.Error()))
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
@@ -1099,7 +1099,7 @@ func extractCopilotChatContent(body []byte) (string, error) {
 		} `json:"choices"`
 	}
 	if err := json.Unmarshal(body, &result); err != nil {
-		return "", fmt.Errorf("Failed to parse Copilot API response: %s; body: %s", err.Error(), truncateForDisplay(string(body), 1000))
+		return "", fmt.Errorf("failed to parse Copilot API response: %s; body: %s", err.Error(), truncateForDisplay(string(body), 1000))
 	}
 
 	for _, choice := range result.Choices {
@@ -1108,7 +1108,7 @@ func extractCopilotChatContent(body []byte) (string, error) {
 		}
 	}
 
-	return "", fmt.Errorf("Copilot API returned no message content; body: %s", truncateForDisplay(string(body), 1000))
+	return "", fmt.Errorf("copilot API returned no message content; body: %s", truncateForDisplay(string(body), 1000))
 }
 
 func truncateForDisplay(s string, limit int) string {
@@ -1116,43 +1116,6 @@ func truncateForDisplay(s string, limit int) string {
 		return s
 	}
 	return s[:limit] + "...(truncated)"
-}
-
-// processCopilotStream reads SSE events from a Copilot streaming response
-// and forwards content deltas to the client.
-func (s *AccountTestService) processCopilotStream(c *gin.Context, body io.Reader) {
-	scanner := bufio.NewScanner(body)
-	scanner.Buffer(make([]byte, 0, 64*1024), 64*1024)
-
-	for scanner.Scan() {
-		line := scanner.Text()
-
-		if !strings.HasPrefix(line, "data: ") {
-			continue
-		}
-		data := line[6:]
-		if data == "[DONE]" {
-			break
-		}
-
-		// Parse OpenAI-compatible streaming chunk
-		var chunk struct {
-			Choices []struct {
-				Delta struct {
-					Content string `json:"content"`
-				} `json:"delta"`
-			} `json:"choices"`
-		}
-		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
-			continue
-		}
-
-		for _, choice := range chunk.Choices {
-			if choice.Delta.Content != "" {
-				s.sendEvent(c, TestEvent{Type: "content", Text: choice.Delta.Content})
-			}
-		}
-	}
 }
 
 // buildGeminiAPIKeyRequest builds request for Gemini API Key accounts

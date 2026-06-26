@@ -2996,7 +2996,7 @@ func (r *usageLogRepository) ListExternalUsageLogs(ctx context.Context, params p
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	out := make([]service.ExternalUsageLog, 0, pageSize)
 	for rows.Next() {
