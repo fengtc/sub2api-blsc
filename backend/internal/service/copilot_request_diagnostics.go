@@ -5,6 +5,8 @@ import (
 	"strings"
 )
 
+const copilotDiagnosticMessageShapeLimit = 40
+
 type copilotAnthropicRequestSummary struct {
 	ParseError      string                         `json:"parse_error,omitempty"`
 	Model           string                         `json:"model,omitempty"`
@@ -17,6 +19,7 @@ type copilotAnthropicRequestSummary struct {
 	ToolChoiceType  string                         `json:"tool_choice_type,omitempty"`
 	SystemKind      string                         `json:"system_kind,omitempty"`
 	MessageShapes   []copilotAnthropicMessageShape `json:"message_shapes,omitempty"`
+	ShapesTruncated bool                           `json:"shapes_truncated,omitempty"`
 }
 
 type copilotAnthropicMessageShape struct {
@@ -42,6 +45,7 @@ type copilotOpenAIRequestSummary struct {
 	ToolChoiceKind    string                      `json:"tool_choice_kind,omitempty"`
 	HasMaxTokens      bool                        `json:"has_max_tokens,omitempty"`
 	MessageShapes     []copilotOpenAIMessageShape `json:"message_shapes,omitempty"`
+	ShapesTruncated   bool                        `json:"shapes_truncated,omitempty"`
 }
 
 type copilotOpenAIMessageShape struct {
@@ -106,7 +110,11 @@ func summarizeCopilotAnthropicRequest(body []byte) copilotAnthropicRequestSummar
 			shape.ThinkingBlocks = shape.BlockTypes["thinking"]
 			shape.ImageBlocks = shape.BlockTypes["image"]
 		}
-		summary.MessageShapes = append(summary.MessageShapes, shape)
+		if shouldKeepCopilotDiagnosticShape(i, len(req.Messages)) {
+			summary.MessageShapes = append(summary.MessageShapes, shape)
+		} else {
+			summary.ShapesTruncated = true
+		}
 	}
 
 	return summary
@@ -147,16 +155,28 @@ func summarizeCopilotOpenAIRequest(body []byte) copilotOpenAIRequestSummary {
 		contentKind := rawJSONKind(msg.Content)
 		summary.RoleCounts[role]++
 		summary.ContentKindCounts[contentKind]++
-		summary.MessageShapes = append(summary.MessageShapes, copilotOpenAIMessageShape{
-			Index:         i,
-			Role:          role,
-			ContentKind:   contentKind,
-			ToolCalls:     len(msg.ToolCalls),
-			HasToolCallID: msg.ToolCallID != "",
-		})
+		if shouldKeepCopilotDiagnosticShape(i, len(req.Messages)) {
+			summary.MessageShapes = append(summary.MessageShapes, copilotOpenAIMessageShape{
+				Index:         i,
+				Role:          role,
+				ContentKind:   contentKind,
+				ToolCalls:     len(msg.ToolCalls),
+				HasToolCallID: msg.ToolCallID != "",
+			})
+		} else {
+			summary.ShapesTruncated = true
+		}
 	}
 
 	return summary
+}
+
+func shouldKeepCopilotDiagnosticShape(index, total int) bool {
+	if total <= copilotDiagnosticMessageShapeLimit {
+		return true
+	}
+	edge := copilotDiagnosticMessageShapeLimit / 2
+	return index < edge || index >= total-edge
 }
 
 func countAnthropicBlocks(raw json.RawMessage, counts map[string]int) {

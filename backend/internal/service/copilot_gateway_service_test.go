@@ -544,6 +544,20 @@ func TestTranslateAnthropicToOpenAI_SanitizesMalformedToolHistory(t *testing.T) 
 	})
 }
 
+func TestTranslateAnthropicToOpenAI_ClampsCopilotMaxTokens(t *testing.T) {
+	body := []byte(`{
+		"model":"claude-opus-4-8",
+		"max_tokens":64000,
+		"messages":[{"role":"user","content":"hello"}],
+		"stream":true
+	}`)
+
+	out := mustTranslateAnthropicToOpenAI(t, body)
+	if out.MaxTokens != copilotMaxOutputTokens {
+		t.Fatalf("max_tokens = %d, want %d", out.MaxTokens, copilotMaxOutputTokens)
+	}
+}
+
 func TestCopilotGatewayService_ListModels(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

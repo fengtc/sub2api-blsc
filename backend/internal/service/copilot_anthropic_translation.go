@@ -17,6 +17,8 @@ import (
 	"strings"
 )
 
+const copilotMaxOutputTokens = 4096
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Anthropic request types
 // ─────────────────────────────────────────────────────────────────────────────
@@ -273,7 +275,7 @@ func translateAnthropicToOpenAI(body []byte, modelMapping map[string]string) ([]
 	openAIReq := openAIChatRequest{
 		Model:       normalizeCopilotModel(req.Model, modelMapping),
 		Messages:    buildOpenAIMessages(req),
-		MaxTokens:   req.MaxTokens,
+		MaxTokens:   clampCopilotMaxTokens(req.MaxTokens),
 		Stop:        req.StopSequences,
 		Stream:      req.Stream,
 		Temperature: req.Temperature,
@@ -286,6 +288,13 @@ func translateAnthropicToOpenAI(body []byte, modelMapping map[string]string) ([]
 	}
 
 	return json.Marshal(openAIReq)
+}
+
+func clampCopilotMaxTokens(maxTokens int) int {
+	if maxTokens <= 0 || maxTokens <= copilotMaxOutputTokens {
+		return maxTokens
+	}
+	return copilotMaxOutputTokens
 }
 
 // sanitizeCopilotClaudeToolHistory downgrades malformed Anthropic tool history
