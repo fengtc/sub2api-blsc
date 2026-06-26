@@ -19,7 +19,8 @@ import type {
   CodexSessionImportRequest,
   CodexSessionImportResult,
   CheckMixedChannelRequest,
-  CheckMixedChannelResponse
+  CheckMixedChannelResponse,
+  CopilotQuotaInfo
 } from '@/types'
 
 /**
@@ -775,6 +776,11 @@ export async function resetOpenAIQuota(id: number): Promise<OpenAIQuotaResetResu
   return data
 }
 
+export async function getCopilotQuota(id: number): Promise<CopilotQuotaInfo> {
+  const { data } = await apiClient.get<CopilotQuotaInfo>(`/admin/accounts/${id}/copilot-quota`)
+  return data
+}
+
 export const accountsAPI = {
   list,
   listWithEtag,
@@ -818,7 +824,8 @@ export const accountsAPI = {
   setPrivacy,
   revertProxyFallback,
   queryOpenAIQuota,
-  resetOpenAIQuota
+  resetOpenAIQuota,
+  getCopilotQuota
 }
 
 export default accountsAPI

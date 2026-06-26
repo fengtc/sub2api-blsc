@@ -1082,6 +1082,18 @@ func (a *Account) IsOpenAI() bool {
 	return a.Platform == PlatformOpenAI
 }
 
+func (a *Account) IsOpenAICompatibleForRequest(requiredCapability OpenAIEndpointCapability, requiredImageCapability OpenAIImagesCapability) bool {
+	if a == nil {
+		return false
+	}
+	if a.IsOpenAI() {
+		return true
+	}
+	return a.Platform == PlatformCopilot &&
+		requiredCapability == OpenAIEndpointCapabilityChatCompletions &&
+		requiredImageCapability == ""
+}
+
 func (a *Account) IsAnthropic() bool {
 	return a.Platform == PlatformAnthropic
 }

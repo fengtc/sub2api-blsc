@@ -187,12 +187,23 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 			forwardBody = h.gatewayService.ReplaceModelInBody(body, channelMapping.MappedModel)
 		}
 		writerSizeBeforeForward := c.Writer.Size()
+		copilotStatusCode := http.StatusOK
 		result, err := func() (*service.OpenAIForwardResult, error) {
 			defer func() {
 				if accountReleaseFunc != nil {
 					accountReleaseFunc()
 				}
 			}()
+			if account.Platform == service.PlatformCopilot {
+				if h.copilotGatewayService == nil {
+					return nil, errors.New("copilot gateway service is not configured")
+				}
+				copilotResult, copilotErr := h.copilotGatewayService.ForwardChatCompletions(c.Request.Context(), c, account, forwardBody)
+				if copilotResult != nil {
+					copilotStatusCode = copilotResult.StatusCode
+				}
+				return copilotChatForwardResult(copilotResult, reqStream, time.Since(forwardStart)), copilotErr
+			}
 			return h.gatewayService.ForwardAsChatCompletions(c.Request.Context(), c, account, forwardBody, promptCacheKey, "")
 		}()
 		cyberBlockKeyChat := ""
@@ -210,6 +221,9 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 		service.SetOpsLatencyMs(c, service.OpsResponseLatencyMsKey, responseLatencyMs)
 		if err == nil && result != nil && result.FirstTokenMs != nil {
 			service.SetOpsLatencyMs(c, service.OpsTimeToFirstTokenMsKey, int64(*result.FirstTokenMs))
+		}
+		if err == nil && account.Platform == service.PlatformCopilot && copilotStatusCode != http.StatusOK {
+			return
 		}
 		if err != nil {
 			if result != nil && result.ImageCount > 0 {

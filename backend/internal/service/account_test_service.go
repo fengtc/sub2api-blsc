@@ -19,6 +19,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/copilot"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/geminicli"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai_compat"
@@ -67,6 +68,7 @@ type AccountTestService struct {
 	geminiTokenProvider       *GeminiTokenProvider
 	claudeTokenProvider       *ClaudeTokenProvider
 	antigravityGatewayService *AntigravityGatewayService
+	copilotTokenProvider      *CopilotTokenProvider
 	httpUpstream              HTTPUpstream
 	cfg                       *config.Config
 	tlsFPProfileService       *TLSFingerprintProfileService
@@ -78,6 +80,7 @@ func NewAccountTestService(
 	geminiTokenProvider *GeminiTokenProvider,
 	claudeTokenProvider *ClaudeTokenProvider,
 	antigravityGatewayService *AntigravityGatewayService,
+	copilotTokenProvider *CopilotTokenProvider,
 	httpUpstream HTTPUpstream,
 	cfg *config.Config,
 	tlsFPProfileService *TLSFingerprintProfileService,
@@ -87,6 +90,7 @@ func NewAccountTestService(
 		geminiTokenProvider:       geminiTokenProvider,
 		claudeTokenProvider:       claudeTokenProvider,
 		antigravityGatewayService: antigravityGatewayService,
+		copilotTokenProvider:      copilotTokenProvider,
 		httpUpstream:              httpUpstream,
 		cfg:                       cfg,
 		tlsFPProfileService:       tlsFPProfileService,
@@ -190,6 +194,10 @@ func (s *AccountTestService) TestAccountConnection(c *gin.Context, accountID int
 
 	if account.Platform == PlatformAntigravity {
 		return s.routeAntigravityTest(c, account, modelID, prompt)
+	}
+
+	if account.Platform == PlatformCopilot {
+		return s.testCopilotAccountConnection(c, account, modelID, prompt)
 	}
 
 	return s.testClaudeAccountConnection(c, account, modelID)
@@ -965,6 +973,194 @@ func (s *AccountTestService) testAntigravityAccountConnection(c *gin.Context, ac
 
 	s.sendEvent(c, TestEvent{Type: "test_complete", Success: true})
 	return nil
+}
+
+// testCopilotAccountConnection tests a GitHub Copilot account's connection.
+//
+// The test flow:
+//  1. Validate github_token credential exists
+//  2. Exchange GitHub token for a short-lived Copilot API token (validates auth)
+//  3. Send a minimal chat/completions request to verify API access
+//  4. Stream the response back to the client as SSE events
+func (s *AccountTestService) testCopilotAccountConnection(c *gin.Context, account *Account, modelID string, prompt string) error {
+	ctx := c.Request.Context()
+
+	// Validate github_token credential
+	githubToken := strings.TrimSpace(account.GetCredential("github_token"))
+	if githubToken == "" {
+		return s.sendErrorAndEnd(c, "No GitHub token available in account credentials")
+	}
+
+	// Default test model
+	testModelID := modelID
+	if testModelID == "" {
+		testModelID = copilot.DefaultTestModel
+	}
+
+	// Apply model mapping if configured
+	if account.Type == "apikey" {
+		mapping := account.GetModelMapping()
+		if mapped, ok := mapping[testModelID]; ok && mapped != "" {
+			testModelID = mapped
+		}
+	}
+
+	// Set SSE headers
+	c.Writer.Header().Set("Content-Type", "text/event-stream")
+	c.Writer.Header().Set("Cache-Control", "no-cache")
+	c.Writer.Header().Set("Connection", "keep-alive")
+	c.Writer.Header().Set("X-Accel-Buffering", "no")
+	c.Writer.Flush()
+
+	// Send test_start event
+	s.sendEvent(c, TestEvent{Type: "test_start", Model: testModelID})
+
+	// Step 1: Exchange token (validates GitHub token + Copilot subscription)
+	s.sendEvent(c, TestEvent{Type: "content", Text: "Exchanging GitHub token for Copilot API token...\n"})
+
+	copilotToken, err := s.copilotTokenProvider.GetAccessToken(ctx, account)
+	if err != nil {
+		return s.sendErrorAndEnd(c, fmt.Sprintf("Token exchange failed: %s", err.Error()))
+	}
+
+	s.sendEvent(c, TestEvent{Type: "content", Text: "✓ Token exchange successful\n\n"})
+
+	// Step 2: Determine base URL
+	baseURL := copilot.CopilotAPIBase
+	if customURL := strings.TrimSpace(account.GetCredential("base_url")); customURL != "" {
+		baseURL = strings.TrimRight(customURL, "/")
+	}
+
+	testPrompt := strings.TrimSpace(prompt)
+	if testPrompt == "" {
+		testPrompt = "Say 'Hello from Copilot!' in one short sentence."
+	}
+
+	// Step 3: Send a minimal non-streaming chat/completions request.
+	// Account tests should produce a clear pass/fail signal; the production
+	// gateway path still supports streaming for real client traffic.
+	payload := map[string]any{
+		"model": testModelID,
+		"messages": []map[string]string{
+			{"role": "user", "content": testPrompt},
+		},
+		"max_tokens": 50,
+		"stream":     false,
+	}
+	payloadBytes, err := json.Marshal(payload)
+	if err != nil {
+		return s.sendErrorAndEnd(c, fmt.Sprintf("Failed to build test payload: %s", err.Error()))
+	}
+
+	upstreamURL := baseURL + "/chat/completions"
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, upstreamURL, bytes.NewReader(payloadBytes))
+	if err != nil {
+		return s.sendErrorAndEnd(c, fmt.Sprintf("Failed to build request: %s", err.Error()))
+	}
+
+	// Set Copilot headers
+	req.Header.Set("Authorization", "Bearer "+copilotToken)
+	req.Header.Set("Content-Type", "application/json")
+	for k, vals := range copilot.CopilotHeaders("user", false) {
+		for _, v := range vals {
+			req.Header.Set(k, v)
+		}
+	}
+
+	s.sendEvent(c, TestEvent{Type: "content", Text: "Calling Copilot chat/completions...\n"})
+
+	// Send request
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return s.sendErrorAndEnd(c, fmt.Sprintf("Copilot API request failed: %s", err.Error()))
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return s.sendErrorAndEnd(c, fmt.Sprintf("Copilot API returned HTTP %d: %s", resp.StatusCode, string(body)))
+	}
+
+	// Step 4: Process non-streaming response
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return s.sendErrorAndEnd(c, fmt.Sprintf("Failed to read Copilot API response: %s", err.Error()))
+	}
+
+	content, err := extractCopilotChatContent(body)
+	if err != nil {
+		return s.sendErrorAndEnd(c, err.Error())
+	}
+	s.sendEvent(c, TestEvent{Type: "content", Text: content})
+
+	s.sendEvent(c, TestEvent{Type: "test_complete", Success: true})
+	return nil
+}
+
+func extractCopilotChatContent(body []byte) (string, error) {
+	var result struct {
+		Choices []struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+		} `json:"choices"`
+	}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return "", fmt.Errorf("Failed to parse Copilot API response: %s; body: %s", err.Error(), truncateForDisplay(string(body), 1000))
+	}
+
+	for _, choice := range result.Choices {
+		if content := strings.TrimSpace(choice.Message.Content); content != "" {
+			return content, nil
+		}
+	}
+
+	return "", fmt.Errorf("Copilot API returned no message content; body: %s", truncateForDisplay(string(body), 1000))
+}
+
+func truncateForDisplay(s string, limit int) string {
+	if limit <= 0 || len(s) <= limit {
+		return s
+	}
+	return s[:limit] + "...(truncated)"
+}
+
+// processCopilotStream reads SSE events from a Copilot streaming response
+// and forwards content deltas to the client.
+func (s *AccountTestService) processCopilotStream(c *gin.Context, body io.Reader) {
+	scanner := bufio.NewScanner(body)
+	scanner.Buffer(make([]byte, 0, 64*1024), 64*1024)
+
+	for scanner.Scan() {
+		line := scanner.Text()
+
+		if !strings.HasPrefix(line, "data: ") {
+			continue
+		}
+		data := line[6:]
+		if data == "[DONE]" {
+			break
+		}
+
+		// Parse OpenAI-compatible streaming chunk
+		var chunk struct {
+			Choices []struct {
+				Delta struct {
+					Content string `json:"content"`
+				} `json:"delta"`
+			} `json:"choices"`
+		}
+		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+			continue
+		}
+
+		for _, choice := range chunk.Choices {
+			if choice.Delta.Content != "" {
+				s.sendEvent(c, TestEvent{Type: "content", Text: choice.Delta.Content})
+			}
+		}
+	}
 }
 
 // buildGeminiAPIKeyRequest builds request for Gemini API Key accounts

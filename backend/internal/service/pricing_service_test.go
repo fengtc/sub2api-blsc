@@ -113,6 +113,30 @@ func TestGetModelPricing_OpenAICompactAliasUsesStaticFallback(t *testing.T) {
 	require.InDelta(t, 1.5e-5, got.OutputCostPerToken, 1e-12)
 }
 
+func TestGetModelPricing_ClaudeOpus48DotAliasUsesOpus48Pricing(t *testing.T) {
+	opus48Pricing := &LiteLLMModelPricing{
+		InputCostPerToken:       5e-6,
+		OutputCostPerToken:      25e-6,
+		CacheReadInputTokenCost: 0.5e-6,
+	}
+	opus41Pricing := &LiteLLMModelPricing{
+		InputCostPerToken:  15e-6,
+		OutputCostPerToken: 75e-6,
+	}
+
+	svc := &PricingService{
+		pricingData: map[string]*LiteLLMModelPricing{
+			"claude-opus-4-8": opus48Pricing,
+			"claude-opus-4-1": opus41Pricing,
+		},
+	}
+
+	got := svc.GetModelPricing("claude-opus-4.8")
+	require.Same(t, opus48Pricing, got)
+	require.InDelta(t, 5e-6, got.InputCostPerToken, 1e-12)
+	require.InDelta(t, 25e-6, got.OutputCostPerToken, 1e-12)
+}
+
 func TestDefaultPricingIncludesCodexAutoReview(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join("..", "..", "resources", "model-pricing", "model_prices_and_context_window.json"))
 	require.NoError(t, err)

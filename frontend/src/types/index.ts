@@ -487,7 +487,7 @@ export interface PaginationConfig {
 
 // ==================== API Key & Group Types ====================
 
-export type GroupPlatform = 'anthropic' | 'openai' | 'gemini' | 'antigravity'
+export type GroupPlatform = 'anthropic' | 'openai' | 'gemini' | 'antigravity' | 'copilot'
 
 export type SubscriptionType = 'standard' | 'subscription'
 
@@ -690,7 +690,7 @@ export interface UpdateGroupRequest {
 
 // ==================== Account & Proxy Types ====================
 
-export type AccountPlatform = 'anthropic' | 'openai' | 'gemini' | 'antigravity'
+export type AccountPlatform = 'anthropic' | 'openai' | 'gemini' | 'antigravity' | 'copilot'
 export type AccountType = 'oauth' | 'setup-token' | 'apikey' | 'upstream' | 'bedrock' | 'service_account'
 export type OAuthAddMethod = 'oauth' | 'setup-token'
 export type ProxyProtocol = 'http' | 'https' | 'socks5' | 'socks5h'
@@ -701,6 +701,20 @@ export interface ClaudeModel {
   type: string
   display_name: string
   created_at: string
+}
+
+export interface CopilotQuotaBucket {
+  entitlement?: number | null
+  used?: number | null
+}
+
+export interface CopilotQuotaInfo {
+  plan?: string
+  plan_type?: string
+  quota_reset_date?: string
+  premium_interactions?: CopilotQuotaBucket | null
+  chat?: CopilotQuotaBucket | null
+  completions?: CopilotQuotaBucket | null
 }
 
 export interface Proxy {

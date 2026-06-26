@@ -108,7 +108,7 @@ func (s *SchedulerSnapshotService) Stop() {
 }
 
 func (s *SchedulerSnapshotService) ListSchedulableAccounts(ctx context.Context, groupID *int64, platform string, hasForcePlatform bool) ([]Account, bool, error) {
-	useMixed := (platform == PlatformAnthropic || platform == PlatformGemini) && !hasForcePlatform
+	useMixed := (platform == PlatformAnthropic || platform == PlatformGemini || platform == PlatformOpenAI) && !hasForcePlatform
 	mode := s.resolveMode(platform, hasForcePlatform)
 	bucket := s.bucketFor(groupID, platform, mode)
 
@@ -677,7 +677,13 @@ func (s *SchedulerSnapshotService) loadAccountsFromDB(ctx context.Context, bucke
 	}
 
 	if useMixed {
-		platforms := []string{bucket.Platform, PlatformAntigravity}
+		platforms := []string{bucket.Platform}
+		if bucket.Platform == PlatformAnthropic || bucket.Platform == PlatformOpenAI {
+			platforms = append(platforms, PlatformCopilot)
+		}
+		if bucket.Platform == PlatformAnthropic || bucket.Platform == PlatformGemini {
+			platforms = append(platforms, PlatformAntigravity)
+		}
 		var accounts []Account
 		var err error
 		if groupID > 0 {
@@ -756,7 +762,7 @@ func (s *SchedulerSnapshotService) resolveMode(platform string, hasForcePlatform
 	if hasForcePlatform {
 		return SchedulerModeForced
 	}
-	if platform == PlatformAnthropic || platform == PlatformGemini {
+	if platform == PlatformAnthropic || platform == PlatformGemini || platform == PlatformOpenAI {
 		return SchedulerModeMixed
 	}
 	return SchedulerModeSingle

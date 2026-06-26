@@ -41,6 +41,8 @@
                   ? 'https://generativelanguage.googleapis.com'
                   : account.platform === 'antigravity'
                     ? 'https://cloudcode-pa.googleapis.com'
+                    : account.platform === 'copilot'
+                      ? 'https://api.individual.githubcopilot.com'
                     : 'https://api.anthropic.com'
             "
           />
@@ -63,6 +65,8 @@
                   ? 'AIza...'
                   : account.platform === 'antigravity'
                     ? 'sk-...'
+                    : account.platform === 'copilot'
+                      ? 'gho_...'
                     : 'sk-ant-...'
             "
           />
@@ -2441,6 +2445,7 @@ const baseUrlHint = computed(() => {
   if (!props.account) return t('admin.accounts.baseUrlHint')
   if (props.account.platform === 'openai') return t('admin.accounts.openai.baseUrlHint')
   if (props.account.platform === 'gemini') return t('admin.accounts.gemini.baseUrlHint')
+  if (props.account.platform === 'copilot') return 'Leave default for official GitHub Copilot API'
   return t('admin.accounts.baseUrlHint')
 })
 
@@ -2842,6 +2847,7 @@ const tempUnschedPresets = computed(() => [
 const defaultBaseUrl = computed(() => {
   if (props.account?.platform === 'openai') return 'https://api.openai.com'
   if (props.account?.platform === 'gemini') return 'https://generativelanguage.googleapis.com'
+  if (props.account?.platform === 'copilot') return 'https://api.individual.githubcopilot.com'
   return 'https://api.anthropic.com'
 })
 
@@ -3698,10 +3704,15 @@ const handleSubmit = async () => {
       // 用户填入新值则覆盖；留空时优先看 credentials_status.has_api_key；
       // 若后端尚未升级（无 credentials_status），回退读旧结构 currentCredentials.api_key。
       // 两者都无才报错。
-      const hasExistingApiKey =
-        props.account.credentials_status?.has_api_key ?? Boolean(currentCredentials.api_key)
+      const hasExistingApiKey = props.account.platform === 'copilot'
+        ? Boolean((props.account.credentials_status as Record<string, unknown> | undefined)?.has_github_token ?? currentCredentials.github_token)
+        : props.account.credentials_status?.has_api_key ?? Boolean(currentCredentials.api_key)
       if (editApiKey.value.trim()) {
-        newCredentials.api_key = editApiKey.value.trim()
+        if (props.account.platform === 'copilot') {
+          newCredentials.github_token = editApiKey.value.trim()
+        } else {
+          newCredentials.api_key = editApiKey.value.trim()
+        }
       } else if (!hasExistingApiKey) {
         appStore.showError(t('admin.accounts.apiKeyIsRequired'))
         return

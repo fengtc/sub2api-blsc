@@ -2272,6 +2272,7 @@ export default {
         openai: 'OpenAI',
         gemini: 'Gemini',
         antigravity: 'Antigravity',
+        copilot: 'Copilot',
       },
       saving: '保存中...',
       noGroups: '暂无分组',
@@ -3340,6 +3341,7 @@ export default {
         anthropic: 'Anthropic',
         gemini: 'Gemini',
         antigravity: 'Antigravity',
+        copilot: 'Copilot',
       },
       types: {
         oauth: 'OAuth',

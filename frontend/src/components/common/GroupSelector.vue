@@ -87,6 +87,8 @@ const isSearchable = computed(() => {
   return props.searchable
 })
 
+const copilotCompatibleGroupPlatforms = new Set<GroupPlatform>(['copilot', 'anthropic', 'openai'])
+
 // Filter groups by platform if specified
 const filteredGroups = computed(() => {
   let result: AdminGroup[] = props.groups
@@ -96,6 +98,9 @@ const filteredGroups = computed(() => {
       result = result.filter(
         (g) => g.platform === 'antigravity' || g.platform === 'anthropic' || g.platform === 'gemini'
       )
+    } else if (props.platform === 'copilot') {
+      // copilot 账号可绑定到显式 copilot 分组，也可作为 Claude/OpenAI 上游混入对应分组
+      result = result.filter((g) => copilotCompatibleGroupPlatforms.has(g.platform))
     } else {
       // 默认：只能选择同 platform 的分组
       result = result.filter((g) => g.platform === props.platform)

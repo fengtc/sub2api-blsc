@@ -1597,6 +1597,7 @@ func (s *GatewayService) SelectAccountForModelWithExclusions(ctx context.Context
 	}
 
 	// anthropic/gemini 分组支持混合调度（包含启用了 mixed_scheduling 的 antigravity 账户）
+	// anthropic/openai 分组允许混入 copilot 账户，用于 OpenRouter-like 上游兼容。
 	// 注意：强制平台模式不走混合调度
 	if (platform == PlatformAnthropic || platform == PlatformGemini) && !hasForcePlatform {
 		account, err := s.selectAccountWithMixedScheduling(ctx, groupID, sessionHash, requestedModel, excludedIDs, platform)
@@ -2466,9 +2467,15 @@ func (s *GatewayService) listSchedulableAccounts(ctx context.Context, groupID *i
 		}
 		return accounts, useMixed, err
 	}
-	useMixed := (platform == PlatformAnthropic || platform == PlatformGemini) && !hasForcePlatform
+	useMixed := (platform == PlatformAnthropic || platform == PlatformGemini || platform == PlatformOpenAI) && !hasForcePlatform
 	if useMixed {
-		platforms := []string{platform, PlatformAntigravity}
+		platforms := []string{platform}
+		if platform == PlatformAnthropic || platform == PlatformOpenAI {
+			platforms = append(platforms, PlatformCopilot)
+		}
+		if platform == PlatformAnthropic || platform == PlatformGemini {
+			platforms = append(platforms, PlatformAntigravity)
+		}
 		var accounts []Account
 		var err error
 		if groupID != nil {
@@ -2562,10 +2569,7 @@ func (s *GatewayService) isAccountAllowedForPlatform(account *Account, platform 
 		return false
 	}
 	if useMixed {
-		if account.Platform == platform {
-			return true
-		}
-		return account.Platform == PlatformAntigravity && account.IsMixedSchedulingEnabled()
+		return isMixedSchedulingPlatformAllowed(account, platform)
 	}
 	return account.Platform == platform
 }
@@ -3509,6 +3513,19 @@ func (s *GatewayService) selectAccountForModelWithPlatform(ctx context.Context, 
 	return selected, nil
 }
 
+func isMixedSchedulingPlatformAllowed(account *Account, nativePlatform string) bool {
+	if account == nil {
+		return false
+	}
+	if account.Platform == nativePlatform {
+		return true
+	}
+	if account.Platform == PlatformCopilot && (nativePlatform == PlatformAnthropic || nativePlatform == PlatformOpenAI) {
+		return true
+	}
+	return account.Platform == PlatformAntigravity && account.IsMixedSchedulingEnabled()
+}
+
 // selectAccountWithMixedScheduling 选择账户（支持混合调度）
 // 查询原生平台账户 + 启用 mixed_scheduling 的 antigravity 账户
 func (s *GatewayService) selectAccountWithMixedScheduling(ctx context.Context, groupID *int64, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}, nativePlatform string) (*Account, error) {
@@ -3543,7 +3560,7 @@ func (s *GatewayService) selectAccountWithMixedScheduling(ctx context.Context, g
 							_ = s.cache.DeleteSessionAccountID(ctx, derefGroupID(groupID), sessionHash)
 						}
 						if !clearSticky && s.isAccountInGroup(account, groupID) && (requestedModel == "" || s.isModelSupportedByAccountWithContext(ctx, account, requestedModel)) && s.isAccountSchedulableForModelSelection(ctx, account, requestedModel) && s.isAccountSchedulableForQuota(account) && s.isAccountSchedulableForWindowCost(ctx, account, true) && s.isAccountSchedulableForRPM(ctx, account, true) {
-							if account.Platform == nativePlatform || (account.Platform == PlatformAntigravity && account.IsMixedSchedulingEnabled()) {
+							if isMixedSchedulingPlatformAllowed(account, nativePlatform) {
 								if s.debugModelRoutingEnabled() {
 									logger.LegacyPrintf("service.gateway", "[ModelRoutingDebug] legacy mixed routed sticky hit: group_id=%v model=%s session=%s account=%d", derefGroupID(groupID), requestedModel, shortSessionHash(sessionHash), accountID)
 								}
@@ -3664,7 +3681,7 @@ func (s *GatewayService) selectAccountWithMixedScheduling(ctx context.Context, g
 						_ = s.cache.DeleteSessionAccountID(ctx, derefGroupID(groupID), sessionHash)
 					}
 					if !clearSticky && s.isAccountInGroup(account, groupID) && (requestedModel == "" || s.isModelSupportedByAccountWithContext(ctx, account, requestedModel)) && s.isAccountSchedulableForModelSelection(ctx, account, requestedModel) && s.isAccountSchedulableForQuota(account) && s.isAccountSchedulableForWindowCost(ctx, account, true) && s.isAccountSchedulableForRPM(ctx, account, true) && !s.isStickyAccountUpstreamRestricted(ctx, groupID, account, requestedModel) {
-						if account.Platform == nativePlatform || (account.Platform == PlatformAntigravity && account.IsMixedSchedulingEnabled()) {
+						if isMixedSchedulingPlatformAllowed(account, nativePlatform) {
 							return account, nil
 						}
 					}
