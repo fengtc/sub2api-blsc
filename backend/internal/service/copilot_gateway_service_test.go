@@ -274,7 +274,7 @@ func TestCopilotGatewayService_HandleErrorResponse(t *testing.T) {
 		c, _ := gin.CreateTestContext(w)
 
 		account := &Account{ID: 42, Platform: PlatformCopilot}
-		result, err := svc.handleErrorResponse(c, resp, account)
+		result, err := svc.handleErrorResponse(c, resp, account, nil)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -305,7 +305,7 @@ func TestCopilotGatewayService_HandleErrorResponse(t *testing.T) {
 		c, _ := gin.CreateTestContext(w)
 
 		account := &Account{ID: 1, Platform: PlatformCopilot}
-		result, err := svc.handleErrorResponse(c, resp, account)
+		result, err := svc.handleErrorResponse(c, resp, account, nil)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -317,6 +317,94 @@ func TestCopilotGatewayService_HandleErrorResponse(t *testing.T) {
 			t.Errorf("response code = %d, want %d", w.Code, http.StatusTooManyRequests)
 		}
 	})
+}
+
+func TestCopilotRequestDiagnosticsRedactsContent(t *testing.T) {
+	anthropicBody := []byte(`{
+		"model":"claude-opus-4-8",
+		"max_tokens":1024,
+		"stream":true,
+		"system":"private system text",
+		"messages":[
+			{"role":"user","content":[
+				{"type":"text","text":"secret user text"},
+				{"type":"image","source":{"type":"base64","media_type":"image/png","data":"secret-image-data"}}
+			]},
+			{"role":"assistant","content":[
+				{"type":"thinking","thinking":"secret thinking"},
+				{"type":"tool_use","id":"toolu_secret","name":"Read","input":{"file_path":"secret.go"}}
+			]},
+			{"role":"user","content":[
+				{"type":"tool_result","tool_use_id":"toolu_secret","content":"secret tool output"}
+			]}
+		],
+		"tools":[{"name":"Read","description":"secret description","input_schema":{"type":"object"}}],
+		"tool_choice":{"type":"auto"}
+	}`)
+
+	anthropicSummary := summarizeCopilotAnthropicRequest(anthropicBody)
+	rawAnthropicSummary, err := json.Marshal(anthropicSummary)
+	if err != nil {
+		t.Fatalf("marshal anthropic summary: %v", err)
+	}
+	summaryText := string(rawAnthropicSummary)
+	for _, secret := range []string{
+		"secret user text",
+		"secret-image-data",
+		"secret thinking",
+		"toolu_secret",
+		"secret.go",
+		"secret tool output",
+		"secret description",
+	} {
+		if strings.Contains(summaryText, secret) {
+			t.Fatalf("anthropic summary leaked %q: %s", secret, summaryText)
+		}
+	}
+	if anthropicSummary.BlockTypeCounts["tool_use"] != 1 || anthropicSummary.BlockTypeCounts["tool_result"] != 1 {
+		t.Fatalf("unexpected block counts: %#v", anthropicSummary.BlockTypeCounts)
+	}
+	if anthropicSummary.MessageCount != 3 || anthropicSummary.ToolsCount != 1 || anthropicSummary.ToolChoiceType != "auto" {
+		t.Fatalf("unexpected anthropic summary: %#v", anthropicSummary)
+	}
+
+	openAIBody := []byte(`{
+		"model":"claude-opus-4.8",
+		"stream":true,
+		"messages":[
+			{"role":"user","content":[{"type":"text","text":"secret user text"}]},
+			{"role":"assistant","content":"secret assistant text","tool_calls":[{"id":"call_secret","type":"function","function":{"name":"Read","arguments":"{\"file_path\":\"secret.go\"}"}}]},
+			{"role":"tool","tool_call_id":"call_secret","content":"secret tool result"}
+		],
+		"tools":[{"type":"function","function":{"name":"Read","description":"secret description"}}],
+		"tool_choice":"auto",
+		"max_tokens":1024
+	}`)
+
+	openAISummary := summarizeCopilotOpenAIRequest(openAIBody)
+	rawOpenAISummary, err := json.Marshal(openAISummary)
+	if err != nil {
+		t.Fatalf("marshal openai summary: %v", err)
+	}
+	summaryText = string(rawOpenAISummary)
+	for _, secret := range []string{
+		"secret user text",
+		"secret assistant text",
+		"call_secret",
+		"secret.go",
+		"secret tool result",
+		"secret description",
+	} {
+		if strings.Contains(summaryText, secret) {
+			t.Fatalf("openai summary leaked %q: %s", secret, summaryText)
+		}
+	}
+	if openAISummary.MessageCount != 3 || openAISummary.ToolsCount != 1 || !openAISummary.HasMaxTokens {
+		t.Fatalf("unexpected openai summary: %#v", openAISummary)
+	}
+	if openAISummary.MessageShapes[1].ToolCalls != 1 || !openAISummary.MessageShapes[2].HasToolCallID {
+		t.Fatalf("unexpected message shapes: %#v", openAISummary.MessageShapes)
+	}
 }
 
 func TestCopilotGatewayService_HandleStreamingResponse(t *testing.T) {

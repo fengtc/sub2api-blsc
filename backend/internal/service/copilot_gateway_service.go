@@ -119,7 +119,10 @@ func (s *CopilotGatewayService) ForwardChatCompletions(
 
 	// Handle error responses
 	if resp.StatusCode != http.StatusOK {
-		return s.handleErrorResponse(c, resp, account)
+		return s.handleErrorResponse(c, resp, account, map[string]any{
+			"endpoint":       "chat_completions",
+			"openai_request": summarizeCopilotOpenAIRequest(body),
+		})
 	}
 
 	// Handle streaming response
@@ -216,15 +219,21 @@ func (s *CopilotGatewayService) handleErrorResponse(
 	c *gin.Context,
 	resp *http.Response,
 	account *Account,
+	diagnostics map[string]any,
 ) (*CopilotForwardResult, error) {
 	defer func() { _ = resp.Body.Close() }()
 
 	body, _ := io.ReadAll(resp.Body)
 
-	slog.Warn("copilot upstream error",
+	logAttrs := []any{
 		"account_id", account.ID,
 		"status", resp.StatusCode,
-		"body", string(body))
+		"body", string(body),
+	}
+	if len(diagnostics) > 0 {
+		logAttrs = append(logAttrs, "diagnostics", diagnostics)
+	}
+	slog.Warn("copilot upstream error", logAttrs...)
 
 	// Handle specific error codes
 	switch resp.StatusCode {
@@ -399,6 +408,7 @@ func (s *CopilotGatewayService) ForwardMessages(
 
 	// Detect streaming before translation (we need to know for the response path).
 	isStream := detectAnthropicStream(anthropicBody)
+	anthropicSummary := summarizeCopilotAnthropicRequest(anthropicBody)
 
 	// Translate Anthropic request → OpenAI format.
 	openAIBody, err := translateAnthropicToOpenAI(anthropicBody, account.GetModelMapping())
@@ -447,7 +457,11 @@ func (s *CopilotGatewayService) ForwardMessages(
 		"latency_ms", time.Since(startTime).Milliseconds())
 
 	if resp.StatusCode != http.StatusOK {
-		return s.handleErrorResponse(c, resp, account)
+		return s.handleErrorResponse(c, resp, account, map[string]any{
+			"endpoint":          "messages",
+			"anthropic_request": anthropicSummary,
+			"openai_request":    summarizeCopilotOpenAIRequest(openAIBody),
+		})
 	}
 
 	if isStream {
