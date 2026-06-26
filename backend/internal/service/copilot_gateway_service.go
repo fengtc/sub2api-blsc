@@ -252,17 +252,23 @@ func (s *CopilotGatewayService) handleErrorResponse(
 	}, nil
 }
 
-// applyModelMapping applies model mapping from account configuration.
-func (s *CopilotGatewayService) applyModelMapping(body []byte, account *Account) ([]byte, string) {
-	// Extract model from request body
+func extractRequestModel(body []byte) string {
 	var req struct {
 		Model string `json:"model"`
 	}
-	if err := json.Unmarshal(body, &req); err != nil || req.Model == "" {
+	if err := json.Unmarshal(body, &req); err != nil {
+		return ""
+	}
+	return req.Model
+}
+
+// applyModelMapping applies model mapping from account configuration.
+func (s *CopilotGatewayService) applyModelMapping(body []byte, account *Account) ([]byte, string) {
+	originalModel := extractRequestModel(body)
+	if originalModel == "" {
 		return body, ""
 	}
 
-	originalModel := req.Model
 	mappedModel := account.GetMappedModel(originalModel)
 
 	if mappedModel != originalModel {
@@ -416,8 +422,7 @@ func (s *CopilotGatewayService) ForwardMessages(
 		return nil, fmt.Errorf("copilot messages: translate request: %w", err)
 	}
 
-	// Apply model mapping (operates on the already-translated OpenAI body).
-	openAIBody, model := s.applyModelMapping(openAIBody, account)
+	model := extractRequestModel(openAIBody)
 
 	// Get Copilot API token.
 	token, err := s.tokenProvider.GetAccessToken(ctx, account)

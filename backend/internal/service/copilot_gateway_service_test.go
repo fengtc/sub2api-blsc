@@ -558,6 +558,72 @@ func TestTranslateAnthropicToOpenAI_ClampsCopilotMaxTokens(t *testing.T) {
 	}
 }
 
+func TestCopilotGatewayService_ForwardMessagesDoesNotDoubleApplyWildcardMapping(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	var upstreamModel string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/chat/completions" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		var req struct {
+			Model string `json:"model"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode upstream request: %v", err)
+		}
+		upstreamModel = req.Model
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"id":"chatcmpl-test","model":"claude-opus-4.8","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`)
+	}))
+	defer server.Close()
+
+	provider := NewCopilotTokenProvider(nil)
+	tok := newCopilotTestToken("copilot-token-123")
+	provider.mu.Lock()
+	provider.tokens[28] = &tok
+	provider.mu.Unlock()
+
+	svc := NewCopilotGatewayService(provider)
+	account := &Account{
+		ID:       28,
+		Platform: PlatformCopilot,
+		Type:     AccountTypeAPIKey,
+		Credentials: map[string]any{
+			"github_token": "ghp_test",
+			"base_url":     server.URL,
+			"model_mapping": map[string]any{
+				"claude-opus-4-8": "claude-opus-4.8",
+				"*":               "claude-haiku-4.5",
+			},
+		},
+	}
+
+	body := []byte(`{
+		"model":"claude-opus-4-8",
+		"max_tokens":64000,
+		"messages":[{"role":"user","content":"hello"}],
+		"stream":false
+	}`)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+
+	result, err := svc.ForwardMessages(t.Context(), c, account, body)
+	if err != nil {
+		t.Fatalf("ForwardMessages error: %v", err)
+	}
+	if result.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want %d", result.StatusCode, http.StatusOK)
+	}
+	if upstreamModel != "claude-opus-4.8" {
+		t.Fatalf("upstream model = %q, want claude-opus-4.8", upstreamModel)
+	}
+	if strings.Contains(upstreamModel, "haiku") {
+		t.Fatalf("upstream model was remapped by wildcard: %q", upstreamModel)
+	}
+}
+
 func TestCopilotGatewayService_ListModels(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
