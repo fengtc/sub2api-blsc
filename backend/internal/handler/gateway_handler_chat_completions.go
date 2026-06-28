@@ -230,6 +230,7 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 			forwardBody = h.gatewayService.ReplaceModelInBody(body, channelMapping.MappedModel)
 		}
 		var result *service.ForwardResult
+		copilotStatusCode := http.StatusOK
 		if account.Platform == service.PlatformGemini {
 			if h.geminiCompatService == nil {
 				h.chatCompletionsErrorResponse(c, http.StatusBadGateway, "upstream_error", "Gemini compatibility service is not configured")
@@ -239,12 +240,27 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 				return
 			}
 			result, err = h.geminiCompatService.ForwardAsChatCompletions(c.Request.Context(), c, account, forwardBody)
+		} else if account.Platform == service.PlatformCopilot {
+			if h.copilotGatewayService == nil {
+				err = errors.New("copilot gateway service is not configured")
+			} else {
+				copilotResult, copilotErr := h.copilotGatewayService.ForwardChatCompletions(c.Request.Context(), c, account, forwardBody)
+				err = copilotErr
+				if copilotResult != nil {
+					copilotStatusCode = copilotResult.StatusCode
+					result = copilotMessagesForwardResult(copilotResult, reqStream, time.Since(requestStart))
+				}
+			}
 		} else {
 			result, err = h.gatewayService.ForwardAsChatCompletions(c.Request.Context(), c, account, forwardBody, parsedReq)
 		}
 
 		if accountReleaseFunc != nil {
 			accountReleaseFunc()
+		}
+
+		if err == nil && account.Platform == service.PlatformCopilot && copilotStatusCode != http.StatusOK {
+			return
 		}
 
 		if err != nil {
