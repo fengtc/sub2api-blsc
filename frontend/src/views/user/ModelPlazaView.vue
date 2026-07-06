@@ -112,23 +112,7 @@ const models: ModelEntry[] = [
   { name: 'claude-haiku-4-5-20251001', provider: 'Claude', endpoint: '/v1/messages', upstream: 'anthropic/claude-haiku-4.5' },
   { name: 'gpt-5.3-codex', provider: 'OpenAI', endpoint: '/v1/chat/completions', upstream: 'openai/gpt-5.3-codex' },
   { name: 'gpt-5.5', provider: 'OpenAI', endpoint: '/v1/chat/completions', upstream: 'openai/gpt-5.5' },
-  { name: 'deepseek-r1', provider: 'DeepSeek', endpoint: '/v1/chat/completions', upstream: 'deepseek/deepseek-r1' },
-  { name: 'deepseek-v4-flash', provider: 'DeepSeek', endpoint: '/v1/chat/completions', upstream: 'deepseek/deepseek-v4-flash' },
-  { name: 'deepseek-v4-pro', provider: 'DeepSeek', endpoint: '/v1/chat/completions', upstream: 'deepseek/deepseek-v4-pro' },
-  { name: 'gemini-3.5-flash', provider: 'Google', endpoint: '/v1/chat/completions', upstream: 'google/gemini-3.5-flash' },
   { name: 'glm-5.1', provider: '智谱', endpoint: '/v1/chat/completions', upstream: 'z-ai/glm-5.1' },
-  { name: 'gpt-oss-120b:free', provider: 'OpenAI', endpoint: '/v1/chat/completions', upstream: 'openai/gpt-oss-120b:free' },
-  { name: 'gpt-oss-20b:free', provider: 'OpenAI', endpoint: '/v1/chat/completions', upstream: 'openai/gpt-oss-20b:free' },
-  { name: 'grok-4.3', provider: 'xAI', endpoint: '/v1/chat/completions', upstream: 'x-ai/grok-4.3' },
-  { name: 'kimi-k2.6', provider: 'Moonshot AI', endpoint: '/v1/chat/completions', upstream: 'moonshotai/kimi-k2.6' },
-  { name: 'kimi-k2.6:free', provider: 'Moonshot AI', endpoint: '/v1/chat/completions', upstream: 'moonshotai/kimi-k2.6:free' },
-  { name: 'mimo-v2.5', provider: 'Xiaomi', endpoint: '/v1/chat/completions', upstream: 'xiaomi/mimo-v2.5' },
-  { name: 'mimo-v2.5-pro', provider: 'Xiaomi', endpoint: '/v1/chat/completions', upstream: 'xiaomi/mimo-v2.5-pro' },
-  { name: 'minimax-m3', provider: 'MiniMax', endpoint: '/v1/chat/completions', upstream: 'minimax/minimax-m3' },
-  { name: 'nemotron-3-ultra-550b-a55b:free', provider: 'NVIDIA', endpoint: '/v1/chat/completions', upstream: 'nvidia/nemotron-3-ultra-550b-a55b:free' },
-  { name: 'phi-4', provider: 'Microsoft', endpoint: '/v1/chat/completions', upstream: 'microsoft/phi-4' },
-  { name: 'qwen3.7-max', provider: 'Qwen', endpoint: '/v1/chat/completions', upstream: 'qwen/qwen3.7-max' },
-  { name: 'qwen3.7-plus', provider: 'Qwen', endpoint: '/v1/chat/completions', upstream: 'qwen/qwen3.7-plus' },
 ]
 
 const searchQuery = ref('')
