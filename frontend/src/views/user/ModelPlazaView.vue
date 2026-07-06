@@ -127,6 +127,9 @@ const models: ModelEntry[] = [
   { name: 'gpt-image-1.5', provider: 'OpenAI', endpoint: '/v1/chat/completions', upstream: 'openai/gpt-image-1.5' },
   { name: 'gpt-image-2', provider: 'OpenAI', endpoint: '/v1/chat/completions', upstream: 'openai/gpt-image-2' },
   { name: 'glm-5.1', provider: '智谱', endpoint: '/v1/chat/completions', upstream: 'z-ai/glm-5.1' },
+  { name: 'GLM-5.2', provider: '智谱', endpoint: '/v1/chat/completions', upstream: 'z-ai/GLM-5.2' },
+  { name: 'GLM-5-Turbo', provider: '智谱', endpoint: '/v1/chat/completions', upstream: 'z-ai/GLM-5-Turbo' },
+  { name: 'GLM-4.7', provider: '智谱', endpoint: '/v1/chat/completions', upstream: 'z-ai/GLM-4.7' },
 ]
 
 const searchQuery = ref('')
