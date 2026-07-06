@@ -104,6 +104,7 @@ const { t } = useI18n()
 const { copyToClipboard } = useClipboard()
 
 const models: ModelEntry[] = [
+  { name: 'claude-sonnet-5', provider: 'Claude', endpoint: '/v1/messages', upstream: 'anthropic/claude-sonnet-5' },
   { name: 'claude-opus-4-8', provider: 'Claude', endpoint: '/v1/messages', upstream: 'anthropic/claude-opus-4.8' },
   { name: 'claude-opus-4-7', provider: 'Claude', endpoint: '/v1/messages', upstream: 'anthropic/claude-opus-4.7' },
   { name: 'claude-sonnet-4-6', provider: 'Claude', endpoint: '/v1/messages', upstream: 'anthropic/claude-sonnet-4.6' },

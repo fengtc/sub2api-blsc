@@ -123,6 +123,7 @@ var DefaultModels = []Model{
 	{ID: "claude-sonnet-4", Object: "model", Type: "model", DisplayName: "Claude Sonnet 4"},
 	{ID: "claude-sonnet-4-5", Object: "model", Type: "model", DisplayName: "Claude Sonnet 4.5"},
 	{ID: "claude-sonnet-4-6", Object: "model", Type: "model", DisplayName: "Claude Sonnet 4.6"},
+	{ID: "claude-sonnet-5", Object: "model", Type: "model", DisplayName: "Claude Sonnet 5"},
 	{ID: "claude-opus-4-5", Object: "model", Type: "model", DisplayName: "Claude Opus 4.5"},
 	{ID: "claude-opus-4-6", Object: "model", Type: "model", DisplayName: "Claude Opus 4.6"},
 	{ID: "claude-haiku-4-5", Object: "model", Type: "model", DisplayName: "Claude Haiku 4.5"},
