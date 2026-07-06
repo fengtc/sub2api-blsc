@@ -932,6 +932,18 @@ export interface Account {
   current_window_cost?: number | null // 当前窗口费用
   active_sessions?: number | null // 当前活跃会话数
   current_rpm?: number | null // 当前分钟 RPM 计数
+  copilot_billing_usage?: CopilotBillingUsageSnapshot | null // GitHub Copilot 官方账单快照
+}
+
+export interface CopilotBillingUsageSnapshot {
+  username: string
+  period: string
+  items_count: number
+  gross_quantity: number
+  gross_amount: number
+  net_quantity: number
+  net_amount: number
+  fetched_at: string
 }
 
 // Account Usage types

@@ -170,14 +170,58 @@ type CheckMixedChannelRequest struct {
 	AccountID *int64  `json:"account_id"`
 }
 
+type ValidateCopilotBillingPATRequest struct {
+	Username string `json:"username" binding:"required"`
+	Token    string `json:"token" binding:"required"`
+}
+
+type githubBillingUsageResponse struct {
+	TimePeriod map[string]any           `json:"timePeriod,omitempty"`
+	User       string                   `json:"user,omitempty"`
+	UsageItems []githubBillingUsageItem `json:"usageItems"`
+}
+
+type githubBillingUsageItem struct {
+	Product          string  `json:"product"`
+	SKU              string  `json:"sku"`
+	Model            string  `json:"model"`
+	UnitType         string  `json:"unitType"`
+	PricePerUnit     float64 `json:"pricePerUnit"`
+	GrossQuantity    float64 `json:"grossQuantity"`
+	GrossAmount      float64 `json:"grossAmount"`
+	DiscountQuantity float64 `json:"discountQuantity"`
+	DiscountAmount   float64 `json:"discountAmount"`
+	NetQuantity      float64 `json:"netQuantity"`
+	NetAmount        float64 `json:"netAmount"`
+}
+
+type copilotBillingUsageSnapshot struct {
+	Username      string  `json:"username"`
+	Period        string  `json:"period"`
+	ItemsCount    int     `json:"items_count"`
+	GrossQuantity float64 `json:"gross_quantity"`
+	GrossAmount   float64 `json:"gross_amount"`
+	NetQuantity   float64 `json:"net_quantity"`
+	NetAmount     float64 `json:"net_amount"`
+	FetchedAt     string  `json:"fetched_at"`
+}
+
+type copilotBillingUsageCacheEntry struct {
+	snapshot  *copilotBillingUsageSnapshot
+	expiresAt time.Time
+}
+
+var copilotBillingUsageCache sync.Map
+
 // AccountWithConcurrency extends Account with real-time concurrency info
 type AccountWithConcurrency struct {
 	*dto.Account
 	CurrentConcurrency int `json:"current_concurrency"`
 	// 以下字段仅对 Anthropic OAuth/SetupToken 账号有效，且仅在启用相应功能时返回
-	CurrentWindowCost *float64 `json:"current_window_cost,omitempty"` // 当前窗口费用
-	ActiveSessions    *int     `json:"active_sessions,omitempty"`     // 当前活跃会话数
-	CurrentRPM        *int     `json:"current_rpm,omitempty"`         // 当前分钟 RPM 计数
+	CurrentWindowCost *float64                     `json:"current_window_cost,omitempty"` // 当前窗口费用
+	ActiveSessions    *int                         `json:"active_sessions,omitempty"`     // 当前活跃会话数
+	CurrentRPM        *int                         `json:"current_rpm,omitempty"`         // 当前分钟 RPM 计数
+	CopilotBilling    *copilotBillingUsageSnapshot `json:"copilot_billing_usage,omitempty"`
 }
 
 const accountListGroupUngroupedQueryValue = "ungrouped"
@@ -197,7 +241,7 @@ func (h *AccountHandler) buildAccountResponseWithRuntime(ctx context.Context, ac
 		}
 	}
 
-	if account.IsAnthropicOAuthOrSetupToken() {
+	if account.SupportsWindowCostControl() {
 		if h.accountUsageService != nil && account.GetWindowCostLimit() > 0 {
 			startTime := account.GetCurrentWindowStartTime()
 			if stats, err := h.accountUsageService.GetAccountWindowStats(ctx, account.ID, startTime); err == nil && stats != nil {
@@ -205,7 +249,9 @@ func (h *AccountHandler) buildAccountResponseWithRuntime(ctx context.Context, ac
 				item.CurrentWindowCost = &cost
 			}
 		}
+	}
 
+	if account.IsAnthropicOAuthOrSetupToken() {
 		if h.sessionLimitCache != nil && account.GetMaxSessions() > 0 {
 			idleTimeout := time.Duration(account.GetSessionIdleTimeoutMinutes()) * time.Minute
 			idleTimeouts := map[int64]time.Duration{account.ID: idleTimeout}
@@ -221,6 +267,10 @@ func (h *AccountHandler) buildAccountResponseWithRuntime(ctx context.Context, ac
 				item.CurrentRPM = &rpm
 			}
 		}
+	}
+
+	if snapshot := h.getCopilotBillingUsageSnapshot(ctx, account); snapshot != nil {
+		item.CopilotBilling = snapshot
 	}
 
 	return item
@@ -278,6 +328,7 @@ func (h *AccountHandler) List(c *gin.Context) {
 	var windowCosts map[int64]float64
 	var activeSessions map[int64]int
 	var rpmCounts map[int64]int
+	var copilotBilling map[int64]*copilotBillingUsageSnapshot
 
 	// 始终获取并发数（Redis ZCARD，极低开销）
 	if h.concurrencyService != nil {
@@ -286,17 +337,20 @@ func (h *AccountHandler) List(c *gin.Context) {
 		}
 	}
 
-	// 识别需要查询窗口费用、会话数和 RPM 的账号（Anthropic OAuth/SetupToken 且启用了相应功能）
+	// 识别需要查询窗口费用、会话数和 RPM 的账号
 	windowCostAccountIDs := make([]int64, 0)
 	sessionLimitAccountIDs := make([]int64, 0)
 	rpmAccountIDs := make([]int64, 0)
+	copilotBillingAccountIDs := make([]int64, 0)
 	sessionIdleTimeouts := make(map[int64]time.Duration) // 各账号的会话空闲超时配置
 	for i := range accounts {
 		acc := &accounts[i]
-		if acc.IsAnthropicOAuthOrSetupToken() {
+		if acc.SupportsWindowCostControl() {
 			if acc.GetWindowCostLimit() > 0 {
 				windowCostAccountIDs = append(windowCostAccountIDs, acc.ID)
 			}
+		}
+		if acc.IsAnthropicOAuthOrSetupToken() {
 			if acc.GetMaxSessions() > 0 {
 				sessionLimitAccountIDs = append(sessionLimitAccountIDs, acc.ID)
 				sessionIdleTimeouts[acc.ID] = time.Duration(acc.GetSessionIdleTimeoutMinutes()) * time.Minute
@@ -304,6 +358,10 @@ func (h *AccountHandler) List(c *gin.Context) {
 			if acc.GetBaseRPM() > 0 {
 				rpmAccountIDs = append(rpmAccountIDs, acc.ID)
 			}
+		}
+		username, token := copilotBillingCredentials(acc)
+		if acc.Platform == service.PlatformCopilot && acc.Type == service.AccountTypeAPIKey && username != "" && token != "" {
+			copilotBillingAccountIDs = append(copilotBillingAccountIDs, acc.ID)
 		}
 	}
 
@@ -332,7 +390,7 @@ func (h *AccountHandler) List(c *gin.Context) {
 
 		for i := range accounts {
 			acc := &accounts[i]
-			if !acc.IsAnthropicOAuthOrSetupToken() || acc.GetWindowCostLimit() <= 0 {
+			if !acc.SupportsWindowCostControl() || acc.GetWindowCostLimit() <= 0 {
 				continue
 			}
 			accCopy := acc // 闭包捕获
@@ -346,6 +404,31 @@ func (h *AccountHandler) List(c *gin.Context) {
 					mu.Unlock()
 				}
 				return nil // 不返回错误，允许部分失败
+			})
+		}
+		_ = g.Wait()
+	}
+
+	if len(copilotBillingAccountIDs) > 0 {
+		copilotBilling = make(map[int64]*copilotBillingUsageSnapshot)
+		var mu sync.Mutex
+		g, gctx := errgroup.WithContext(c.Request.Context())
+		g.SetLimit(3)
+
+		for i := range accounts {
+			acc := &accounts[i]
+			username, token := copilotBillingCredentials(acc)
+			if acc.Platform != service.PlatformCopilot || acc.Type != service.AccountTypeAPIKey || username == "" || token == "" {
+				continue
+			}
+			accCopy := acc
+			g.Go(func() error {
+				if snapshot := h.getCopilotBillingUsageSnapshot(gctx, accCopy); snapshot != nil {
+					mu.Lock()
+					copilotBilling[accCopy.ID] = snapshot
+					mu.Unlock()
+				}
+				return nil
 			})
 		}
 		_ = g.Wait()
@@ -378,6 +461,12 @@ func (h *AccountHandler) List(c *gin.Context) {
 		if rpmCounts != nil {
 			if rpm, ok := rpmCounts[acc.ID]; ok {
 				item.CurrentRPM = &rpm
+			}
+		}
+
+		if copilotBilling != nil {
+			if snapshot, ok := copilotBilling[acc.ID]; ok {
+				item.CopilotBilling = snapshot
 			}
 		}
 
@@ -512,6 +601,184 @@ func (h *AccountHandler) CheckMixedChannel(c *gin.Context) {
 	}
 
 	response.Success(c, gin.H{"has_risk": false})
+}
+
+// ValidateCopilotBillingPAT checks whether a GitHub fine-grained PAT can read
+// personal billing usage for the configured Copilot account owner.
+// POST /api/v1/admin/accounts/copilot-billing-pat/validate
+func (h *AccountHandler) ValidateCopilotBillingPAT(c *gin.Context) {
+	var req ValidateCopilotBillingPATRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+
+	username := strings.TrimSpace(req.Username)
+	token := strings.TrimSpace(req.Token)
+	if username == "" || token == "" {
+		response.BadRequest(c, "GitHub username and Billing PAT are required")
+		return
+	}
+	if len(username) > 100 || strings.ContainsAny(username, "/?#") {
+		response.BadRequest(c, "Invalid GitHub username")
+		return
+	}
+
+	now := time.Now().UTC()
+	usage, statusCode, message, err := fetchGitHubBillingAIUsage(
+		c.Request.Context(),
+		username,
+		token,
+		now.Year(),
+		int(now.Month()),
+		0,
+	)
+	if err != nil {
+		if statusCode == http.StatusUnauthorized {
+			response.Error(c, http.StatusUnauthorized, "GitHub PAT is invalid or expired")
+			return
+		}
+		if statusCode == http.StatusForbidden {
+			response.Error(c, http.StatusForbidden, "GitHub PAT cannot read billing usage; enable Account permissions -> Plan -> Read-only")
+			return
+		}
+		if statusCode == http.StatusNotFound {
+			response.Error(c, http.StatusNotFound, "GitHub user billing usage was not found")
+			return
+		}
+		if message != "" {
+			response.BadRequest(c, message)
+			return
+		}
+		response.ErrorFrom(c, err)
+		return
+	}
+
+	var grossQuantity, grossAmount, netAmount float64
+	for _, item := range usage.UsageItems {
+		grossQuantity += item.GrossQuantity
+		grossAmount += item.GrossAmount
+		netAmount += item.NetAmount
+	}
+
+	response.Success(c, gin.H{
+		"valid":          true,
+		"username":       usage.User,
+		"period":         usage.TimePeriod,
+		"items_count":    len(usage.UsageItems),
+		"gross_quantity": grossQuantity,
+		"gross_amount":   grossAmount,
+		"net_amount":     netAmount,
+	})
+}
+
+func fetchGitHubBillingAIUsage(ctx context.Context, username, token string, year, month, day int) (*githubBillingUsageResponse, int, string, error) {
+	url := fmt.Sprintf("https://api.github.com/users/%s/settings/billing/ai_credit/usage?year=%d&month=%d", username, year, month)
+	if day > 0 {
+		url += fmt.Sprintf("&day=%d", day)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, 0, "", err
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("X-GitHub-Api-Version", "2026-03-10")
+	req.Header.Set("User-Agent", "sub2api-billing-check")
+
+	client := &http.Client{Timeout: 15 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, 0, "", err
+	}
+	defer resp.Body.Close()
+
+	var payload githubBillingUsageResponse
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+			return nil, resp.StatusCode, "", err
+		}
+		return &payload, resp.StatusCode, "", nil
+	}
+
+	var errPayload struct {
+		Message string `json:"message"`
+	}
+	_ = json.NewDecoder(resp.Body).Decode(&errPayload)
+	if errPayload.Message == "" {
+		errPayload.Message = resp.Status
+	}
+	return nil, resp.StatusCode, errPayload.Message, fmt.Errorf("github billing usage check failed: %s", errPayload.Message)
+}
+
+func (h *AccountHandler) getCopilotBillingUsageSnapshot(ctx context.Context, account *service.Account) *copilotBillingUsageSnapshot {
+	if account == nil || account.Platform != service.PlatformCopilot || account.Type != service.AccountTypeAPIKey {
+		return nil
+	}
+	username, token := copilotBillingCredentials(account)
+	if username == "" || token == "" {
+		return nil
+	}
+
+	now := time.Now().UTC()
+	period := fmt.Sprintf("%04d-%02d", now.Year(), int(now.Month()))
+	tokenHash := sha256.Sum256([]byte(token))
+	cacheKey := fmt.Sprintf("%d:%s:%x", account.ID, period, tokenHash[:8])
+	if cached, ok := copilotBillingUsageCache.Load(cacheKey); ok {
+		entry, _ := cached.(copilotBillingUsageCacheEntry)
+		if entry.snapshot != nil && now.Before(entry.expiresAt) {
+			return entry.snapshot
+		}
+		copilotBillingUsageCache.Delete(cacheKey)
+	}
+
+	fetchCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	usage, _, _, err := fetchGitHubBillingAIUsage(fetchCtx, username, token, now.Year(), int(now.Month()), 0)
+	if err != nil || usage == nil {
+		slog.Debug("copilot_billing_usage_fetch_failed", "account_id", account.ID, "username", username, "error", err)
+		return nil
+	}
+
+	snapshot := summarizeCopilotBillingUsage(usage, username, period, now)
+	copilotBillingUsageCache.Store(cacheKey, copilotBillingUsageCacheEntry{
+		snapshot:  snapshot,
+		expiresAt: now.Add(10 * time.Minute),
+	})
+	return snapshot
+}
+
+func copilotBillingCredentials(account *service.Account) (string, string) {
+	if account == nil || account.Credentials == nil {
+		return "", ""
+	}
+	username, _ := account.Credentials["billing_username"].(string)
+	token, _ := account.Credentials["billing_pat"].(string)
+	return strings.TrimSpace(username), strings.TrimSpace(token)
+}
+
+func summarizeCopilotBillingUsage(usage *githubBillingUsageResponse, fallbackUsername, period string, fetchedAt time.Time) *copilotBillingUsageSnapshot {
+	if usage == nil {
+		return nil
+	}
+	username := strings.TrimSpace(usage.User)
+	if username == "" {
+		username = fallbackUsername
+	}
+	snapshot := &copilotBillingUsageSnapshot{
+		Username:   username,
+		Period:     period,
+		ItemsCount: len(usage.UsageItems),
+		FetchedAt:  fetchedAt.Format(time.RFC3339),
+	}
+	for _, item := range usage.UsageItems {
+		snapshot.GrossQuantity += item.GrossQuantity
+		snapshot.GrossAmount += item.GrossAmount
+		snapshot.NetQuantity += item.NetQuantity
+		snapshot.NetAmount += item.NetAmount
+	}
+	return snapshot
 }
 
 // Create handles creating a new account

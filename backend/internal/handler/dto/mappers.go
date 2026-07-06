@@ -236,14 +236,18 @@ func AccountFromServiceShallow(a *service.Account) *Account {
 		GroupIDs:                a.GroupIDs,
 	}
 
-	// 提取 5h 窗口费用控制和会话数量控制配置（仅 Anthropic OAuth/SetupToken 账号有效）
-	if a.IsAnthropicOAuthOrSetupToken() {
+	// 提取窗口费用控制配置（Anthropic OAuth/SetupToken 和 Copilot 账号有效）
+	if a.SupportsWindowCostControl() {
 		if limit := a.GetWindowCostLimit(); limit > 0 {
 			out.WindowCostLimit = &limit
 		}
 		if reserve := a.GetWindowCostStickyReserve(); reserve > 0 {
 			out.WindowCostStickyReserve = &reserve
 		}
+	}
+
+	// 提取会话数量控制配置（仅 Anthropic OAuth/SetupToken 账号有效）
+	if a.IsAnthropicOAuthOrSetupToken() {
 		if maxSessions := a.GetMaxSessions(); maxSessions > 0 {
 			out.MaxSessions = &maxSessions
 		}

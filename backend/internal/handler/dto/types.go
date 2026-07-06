@@ -191,7 +191,7 @@ type Account struct {
 	SessionWindowEnd    *time.Time `json:"session_window_end"`
 	SessionWindowStatus string     `json:"session_window_status"`
 
-	// 5h窗口费用控制（仅 Anthropic OAuth/SetupToken 账号有效）
+	// 窗口费用控制（Anthropic OAuth/SetupToken 和 Copilot 账号有效）
 	// 从 extra 字段提取，方便前端显示和编辑
 	WindowCostLimit         *float64 `json:"window_cost_limit,omitempty"`
 	WindowCostStickyReserve *float64 `json:"window_cost_sticky_reserve,omitempty"`

@@ -166,9 +166,44 @@ func (h *CopilotGatewayHandler) ChatCompletions(c *gin.Context) {
 			zap.String("account_name", account.Name))
 		setOpsSelectedAccount(c, account.ID, account.Platform)
 
+		if !h.gatewayService.IsAccountSchedulableForWindowCost(ctx, account, false) {
+			reqLog.Debug("copilot.account_window_cost_limited",
+				zap.Int64("account_id", account.ID))
+			failedAccountIDs[account.ID] = struct{}{}
+			continue
+		}
+		if skip, used, limit := shouldSkipCopilotAccountForBilling(ctx, account); skip {
+			reqLog.Info("copilot.account_billing_credit_limited",
+				zap.Int64("account_id", account.ID),
+				zap.Float64("used_credits", used),
+				zap.Float64("credit_limit", limit))
+			failedAccountIDs[account.ID] = struct{}{}
+			continue
+		}
+
+		accountReleaseFunc, accountAcquired, err := h.concurrencyHelper.TryAcquireAccountSlot(ctx, account.ID, account.Concurrency)
+		if err != nil {
+			reqLog.Warn("copilot.account_slot_acquire_failed",
+				zap.Int64("account_id", account.ID),
+				zap.Error(err))
+			h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Service temporarily unavailable, please retry later")
+			return
+		}
+		if !accountAcquired {
+			reqLog.Debug("copilot.account_slot_full",
+				zap.Int64("account_id", account.ID),
+				zap.Int("account_concurrency", account.Concurrency))
+			failedAccountIDs[account.ID] = struct{}{}
+			continue
+		}
+		accountReleaseFunc = wrapReleaseOnDone(ctx, accountReleaseFunc)
+
 		// Forward request to Copilot API
 		result, fwdErr := h.copilotGatewayService.ForwardChatCompletions(ctx, c, account, body)
 		if fwdErr != nil {
+			if accountReleaseFunc != nil {
+				accountReleaseFunc()
+			}
 			failedAccountIDs[account.ID] = struct{}{}
 			switchCount++
 			if switchCount >= h.maxAccountSwitches {
@@ -191,6 +226,9 @@ func (h *CopilotGatewayHandler) ChatCompletions(c *gin.Context) {
 			reqLog.Debug("copilot.request_completed_with_error",
 				zap.Int64("account_id", account.ID),
 				zap.Int("status", result.StatusCode))
+			if accountReleaseFunc != nil {
+				accountReleaseFunc()
+			}
 			return
 		}
 
@@ -200,6 +238,7 @@ func (h *CopilotGatewayHandler) ChatCompletions(c *gin.Context) {
 			clientIP := ip.GetClientIP(c)
 			capturedResult := result
 			capturedAccount := account
+			quotaPlatform := service.QuotaPlatform(c.Request.Context(), apiKey)
 			go func() {
 				recordCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 				defer cancel()
@@ -212,14 +251,17 @@ func (h *CopilotGatewayHandler) ChatCompletions(c *gin.Context) {
 					},
 				}
 				if err := h.gatewayService.RecordUsage(recordCtx, &service.RecordUsageInput{
-					Result:        fwdResult,
-					APIKey:        apiKey,
-					User:          apiKey.User,
-					Account:       capturedAccount,
-					Subscription:  subscription,
-					UserAgent:     userAgent,
-					IPAddress:     clientIP,
-					APIKeyService: nil,
+					Result:           fwdResult,
+					APIKey:           apiKey,
+					User:             apiKey.User,
+					Account:          capturedAccount,
+					Subscription:     subscription,
+					InboundEndpoint:  "/copilot/v1/chat/completions",
+					UpstreamEndpoint: "/chat/completions",
+					UserAgent:        userAgent,
+					IPAddress:        clientIP,
+					APIKeyService:    nil,
+					QuotaPlatform:    quotaPlatform,
 				}); err != nil {
 					reqLog.Error("copilot.record_usage_failed", zap.Error(err))
 				}
@@ -229,6 +271,9 @@ func (h *CopilotGatewayHandler) ChatCompletions(c *gin.Context) {
 		reqLog.Debug("copilot.messages.completed",
 			zap.Int64("account_id", account.ID),
 			zap.Int("switch_count", switchCount))
+		if accountReleaseFunc != nil {
+			accountReleaseFunc()
+		}
 		return
 	}
 }
@@ -406,9 +451,44 @@ func (h *CopilotGatewayHandler) Messages(c *gin.Context) {
 			zap.String("account_name", account.Name))
 		setOpsSelectedAccount(c, account.ID, account.Platform)
 
+		if !h.gatewayService.IsAccountSchedulableForWindowCost(ctx, account, false) {
+			reqLog.Debug("copilot.messages.account_window_cost_limited",
+				zap.Int64("account_id", account.ID))
+			failedAccountIDs[account.ID] = struct{}{}
+			continue
+		}
+		if skip, used, limit := shouldSkipCopilotAccountForBilling(ctx, account); skip {
+			reqLog.Info("copilot.messages.account_billing_credit_limited",
+				zap.Int64("account_id", account.ID),
+				zap.Float64("used_credits", used),
+				zap.Float64("credit_limit", limit))
+			failedAccountIDs[account.ID] = struct{}{}
+			continue
+		}
+
+		accountReleaseFunc, accountAcquired, err := h.concurrencyHelper.TryAcquireAccountSlot(ctx, account.ID, account.Concurrency)
+		if err != nil {
+			reqLog.Warn("copilot.messages.account_slot_acquire_failed",
+				zap.Int64("account_id", account.ID),
+				zap.Error(err))
+			h.anthropicErrorResponse(c, http.StatusServiceUnavailable, "api_error", "Service temporarily unavailable, please retry later")
+			return
+		}
+		if !accountAcquired {
+			reqLog.Debug("copilot.messages.account_slot_full",
+				zap.Int64("account_id", account.ID),
+				zap.Int("account_concurrency", account.Concurrency))
+			failedAccountIDs[account.ID] = struct{}{}
+			continue
+		}
+		accountReleaseFunc = wrapReleaseOnDone(ctx, accountReleaseFunc)
+
 		// Forward request, translating Anthropic ↔ Copilot.
 		result, fwdErr := h.copilotGatewayService.ForwardMessages(ctx, c, account, body)
 		if fwdErr != nil {
+			if accountReleaseFunc != nil {
+				accountReleaseFunc()
+			}
 			failedAccountIDs[account.ID] = struct{}{}
 			switchCount++
 			if switchCount >= h.maxAccountSwitches {
@@ -430,6 +510,9 @@ func (h *CopilotGatewayHandler) Messages(c *gin.Context) {
 			reqLog.Debug("copilot.messages.completed_with_error",
 				zap.Int64("account_id", account.ID),
 				zap.Int("status", result.StatusCode))
+			if accountReleaseFunc != nil {
+				accountReleaseFunc()
+			}
 			return
 		}
 
@@ -439,6 +522,7 @@ func (h *CopilotGatewayHandler) Messages(c *gin.Context) {
 			clientIP := ip.GetClientIP(c)
 			capturedResult := result
 			capturedAccount := account
+			quotaPlatform := service.QuotaPlatform(c.Request.Context(), apiKey)
 			go func() {
 				recordCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 				defer cancel()
@@ -451,14 +535,17 @@ func (h *CopilotGatewayHandler) Messages(c *gin.Context) {
 					},
 				}
 				if err := h.gatewayService.RecordUsage(recordCtx, &service.RecordUsageInput{
-					Result:        fwdResult,
-					APIKey:        apiKey,
-					User:          apiKey.User,
-					Account:       capturedAccount,
-					Subscription:  subscription,
-					UserAgent:     userAgent,
-					IPAddress:     clientIP,
-					APIKeyService: nil,
+					Result:           fwdResult,
+					APIKey:           apiKey,
+					User:             apiKey.User,
+					Account:          capturedAccount,
+					Subscription:     subscription,
+					InboundEndpoint:  "/copilot/v1/messages",
+					UpstreamEndpoint: "/chat/completions",
+					UserAgent:        userAgent,
+					IPAddress:        clientIP,
+					APIKeyService:    nil,
+					QuotaPlatform:    quotaPlatform,
 				}); err != nil {
 					reqLog.Error("copilot.messages.record_usage_failed", zap.Error(err))
 				}
@@ -468,6 +555,9 @@ func (h *CopilotGatewayHandler) Messages(c *gin.Context) {
 		reqLog.Debug("copilot.messages.completed",
 			zap.Int64("account_id", account.ID),
 			zap.Int("switch_count", switchCount))
+		if accountReleaseFunc != nil {
+			accountReleaseFunc()
+		}
 		return
 	}
 }

@@ -1702,6 +1702,18 @@ func (a *Account) IsAnthropicOAuthOrSetupToken() bool {
 	return a.Platform == PlatformAnthropic && (a.Type == AccountTypeOAuth || a.Type == AccountTypeSetupToken)
 }
 
+// SupportsWindowCostControl 判断账号是否支持本地窗口费用调度。
+// Anthropic OAuth/SetupToken 使用 Claude 5h 窗口控制；Copilot 使用本地估算窗口控制。
+func (a *Account) SupportsWindowCostControl() bool {
+	if a == nil {
+		return false
+	}
+	if a.IsAnthropicOAuthOrSetupToken() {
+		return true
+	}
+	return a.Platform == PlatformCopilot
+}
+
 // IsTLSFingerprintEnabled 检查是否启用 TLS 指纹伪装
 // 仅适用于 Anthropic OAuth/SetupToken 类型账号
 // 启用后将模拟 Claude Code (Node.js) 客户端的 TLS 握手特征

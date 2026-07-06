@@ -1097,6 +1097,11 @@ func extractCopilotChatContent(body []byte) (string, error) {
 				Content string `json:"content"`
 			} `json:"message"`
 		} `json:"choices"`
+		Usage *struct {
+			TotalTokens      int `json:"total_tokens"`
+			PromptTokens     int `json:"prompt_tokens"`
+			CompletionTokens int `json:"completion_tokens"`
+		} `json:"usage"`
 	}
 	if err := json.Unmarshal(body, &result); err != nil {
 		return "", fmt.Errorf("failed to parse Copilot API response: %s; body: %s", err.Error(), truncateForDisplay(string(body), 1000))
@@ -1106,6 +1111,10 @@ func extractCopilotChatContent(body []byte) (string, error) {
 		if content := strings.TrimSpace(choice.Message.Content); content != "" {
 			return content, nil
 		}
+	}
+
+	if result.Usage != nil && (result.Usage.TotalTokens > 0 || result.Usage.PromptTokens > 0 || result.Usage.CompletionTokens > 0) {
+		return "Copilot API returned a usage-only response; model access verified.", nil
 	}
 
 	return "", fmt.Errorf("copilot API returned no message content; body: %s", truncateForDisplay(string(body), 1000))

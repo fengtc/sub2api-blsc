@@ -2642,7 +2642,7 @@ func (s *GatewayService) withWindowCostPrefetch(ctx context.Context, accounts []
 	accountIDs := make([]int64, 0, len(accounts))
 	for i := range accounts {
 		account := &accounts[i]
-		if account == nil || !account.IsAnthropicOAuthOrSetupToken() {
+		if account == nil || !account.SupportsWindowCostControl() {
 			continue
 		}
 		if account.GetWindowCostLimit() <= 0 {
@@ -2745,12 +2745,10 @@ func (s *GatewayService) isAccountSchedulableForQuota(account *Account) bool {
 	return !account.IsQuotaExceeded()
 }
 
-// isAccountSchedulableForWindowCost 检查账号是否可根据窗口费用进行调度
-// 仅适用于 Anthropic OAuth/SetupToken 账号
+// isAccountSchedulableForWindowCost 检查账号是否可根据窗口费用进行调度。
 // 返回 true 表示可调度，false 表示不可调度
 func (s *GatewayService) isAccountSchedulableForWindowCost(ctx context.Context, account *Account, isSticky bool) bool {
-	// 只检查 Anthropic OAuth/SetupToken 账号
-	if !account.IsAnthropicOAuthOrSetupToken() {
+	if !account.SupportsWindowCostControl() {
 		return true
 	}
 
@@ -2804,6 +2802,12 @@ checkSchedulability:
 		return false
 	}
 	return true
+}
+
+// IsAccountSchedulableForWindowCost exposes local window-cost scheduling for
+// handlers that do not use SelectAccountWithLoadAwareness, such as Copilot.
+func (s *GatewayService) IsAccountSchedulableForWindowCost(ctx context.Context, account *Account, isSticky bool) bool {
+	return s.isAccountSchedulableForWindowCost(ctx, account, isSticky)
 }
 
 // rpmPrefetchContextKey is the context key for prefetched RPM counts.
@@ -9577,8 +9581,39 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 		return billingErr
 	}
 	writeUsageLogBestEffort(ctx, s.usageLogRepo, usageLog, "service.gateway")
+	s.refreshWindowCostCacheAfterUsage(ctx, account)
 
 	return nil
+}
+
+func (s *GatewayService) refreshWindowCostCacheAfterUsage(ctx context.Context, account *Account) {
+	if s == nil || account == nil || !account.SupportsWindowCostControl() {
+		return
+	}
+	if account.GetWindowCostLimit() <= 0 || s.sessionLimitCache == nil || s.usageLogRepo == nil {
+		return
+	}
+	baseCtx := context.Background()
+	if ctx != nil {
+		baseCtx = context.WithoutCancel(ctx)
+	}
+	cacheCtx, cancel := context.WithTimeout(baseCtx, 3*time.Second)
+	defer cancel()
+	startTime := account.GetCurrentWindowStartTime()
+	stats, err := s.usageLogRepo.GetAccountWindowStats(cacheCtx, account.ID, startTime)
+	if err != nil || stats == nil {
+		if err != nil {
+			slog.Debug("window_cost_refresh_failed",
+				"account_id", account.ID,
+				"error", err)
+		}
+		return
+	}
+	if err := s.sessionLimitCache.SetWindowCost(cacheCtx, account.ID, stats.StandardCost); err != nil {
+		slog.Debug("window_cost_cache_set_failed",
+			"account_id", account.ID,
+			"error", err)
+	}
 }
 
 // calculateRecordUsageCost 根据请求类型和选项计算费用。

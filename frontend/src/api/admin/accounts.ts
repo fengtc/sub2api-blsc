@@ -158,6 +158,27 @@ export async function checkMixedChannelRisk(
   return data
 }
 
+export interface ValidateCopilotBillingPATResult {
+  valid: boolean
+  username: string
+  period?: Record<string, unknown>
+  items_count: number
+  gross_quantity: number
+  gross_amount: number
+  net_amount: number
+}
+
+export async function validateCopilotBillingPAT(params: {
+  username: string
+  token: string
+}): Promise<ValidateCopilotBillingPATResult> {
+  const { data } = await apiClient.post<ValidateCopilotBillingPATResult>(
+    '/admin/accounts/copilot-billing-pat/validate',
+    params
+  )
+  return data
+}
+
 /**
  * Delete account
  * @param id - Account ID
@@ -794,6 +815,7 @@ export const accountsAPI = {
   create,
   update,
   checkMixedChannelRisk,
+  validateCopilotBillingPAT,
   delete: deleteAccount,
   toggleStatus,
   testAccount,

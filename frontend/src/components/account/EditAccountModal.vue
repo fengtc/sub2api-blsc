@@ -73,6 +73,81 @@
           <p class="input-hint">{{ t('admin.accounts.leaveEmptyToKeep') }}</p>
         </div>
 
+        <div v-if="account.platform === 'copilot'" class="space-y-3 rounded-lg border border-gray-200 p-3 dark:border-dark-600">
+          <div>
+            <label class="input-label">GitHub Billing 用户名</label>
+            <input
+              v-model="editCopilotBillingUsername"
+              type="text"
+              class="input"
+              placeholder="fengtc"
+              autocomplete="off"
+            />
+            <p class="input-hint">用于读取个人 Copilot AI Credits 账单用量。</p>
+          </div>
+          <div>
+            <label class="input-label">Billing PAT</label>
+            <div class="flex gap-2">
+              <input
+                v-model="editCopilotBillingPAT"
+                type="password"
+                class="input font-mono"
+                placeholder="留空则保留已有 PAT"
+                autocomplete="new-password"
+                data-1p-ignore
+                data-lpignore="true"
+                data-bwignore="true"
+              />
+              <button
+                type="button"
+                class="btn btn-secondary shrink-0"
+                :disabled="copilotBillingValidating || !editCopilotBillingUsername.trim() || !editCopilotBillingPAT.trim()"
+                @click="validateCopilotBillingPAT"
+              >
+                {{ copilotBillingValidating ? '验证中' : '验证' }}
+              </button>
+            </div>
+            <p class="input-hint">
+              需要 GitHub fine-grained PAT：Account permissions -> Plan -> Read-only。
+              <span v-if="account.credentials_status?.has_billing_pat">已配置，留空保留。</span>
+            </p>
+          </div>
+          <p
+            v-if="copilotBillingValidationMessage"
+            :class="[
+              'text-xs',
+              copilotBillingValidationOk ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'
+            ]"
+          >
+            {{ copilotBillingValidationMessage }}
+          </p>
+          <div class="grid gap-3 sm:grid-cols-2">
+            <div>
+              <label class="input-label">AI Credits 月额度</label>
+              <input
+                v-model.number="editCopilotBillingCreditLimit"
+                type="number"
+                min="1"
+                step="1"
+                class="input"
+                placeholder="20000"
+              />
+              <p class="input-hint">达到该额度后自动跳过此账号调度。</p>
+            </div>
+            <label class="flex items-start gap-3 rounded-lg border border-gray-200 p-3 dark:border-dark-600">
+              <input
+                v-model="editCopilotBillingAutoPauseDisabled"
+                type="checkbox"
+                class="mt-1 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+              />
+              <span>
+                <span class="block text-sm font-medium text-gray-700 dark:text-gray-300">关闭额度用完自动停止调度</span>
+                <span class="mt-1 block text-xs text-gray-500 dark:text-gray-400">仅展示官方用量，不参与调度保护。</span>
+              </span>
+            </label>
+          </div>
+        </div>
+
         <!-- Model Restriction Section (不适用于 Antigravity) -->
         <div v-if="account.platform !== 'antigravity'" class="border-t border-gray-200 pt-4 dark:border-dark-600">
           <label class="input-label">{{ t('admin.accounts.modelRestriction') }}</label>
@@ -1884,9 +1959,9 @@
         </div>
       </div>
 
-      <!-- 配额控制 (Anthropic OAuth/SetupToken: 亲和 + 窗口费用 + 会话 + RPM 等) -->
+      <!-- 配额控制 -->
       <div
-        v-if="account?.platform === 'anthropic' && (account?.type === 'oauth' || account?.type === 'setup-token')"
+        v-if="supportsWindowCostControl"
         class="border-t border-gray-200 pt-4 dark:border-dark-600 space-y-4"
       >
         <div class="mb-3">
@@ -1957,7 +2032,7 @@
         </div>
 
         <!-- Session Limit -->
-        <div class="rounded-lg border border-gray-200 p-4 dark:border-dark-600">
+        <div v-if="supportsAnthropicQuotaControl" class="rounded-lg border border-gray-200 p-4 dark:border-dark-600">
           <div class="mb-3 flex items-center justify-between">
             <div>
               <label class="input-label mb-0">{{ t('admin.accounts.quotaControl.sessionLimit.label') }}</label>
@@ -2014,7 +2089,7 @@
         </div>
 
         <!-- RPM Limit -->
-        <div class="rounded-lg border border-gray-200 p-4 dark:border-dark-600">
+        <div v-if="supportsAnthropicQuotaControl" class="rounded-lg border border-gray-200 p-4 dark:border-dark-600">
           <div class="mb-3 flex items-center justify-between">
             <div>
               <label class="input-label mb-0">{{ t('admin.accounts.quotaControl.rpmLimit.label') }}</label>
@@ -2127,7 +2202,7 @@
         </div>
 
         <!-- TLS Fingerprint -->
-        <div class="rounded-lg border border-gray-200 p-4 dark:border-dark-600">
+        <div v-if="supportsAnthropicQuotaControl" class="rounded-lg border border-gray-200 p-4 dark:border-dark-600">
           <div class="flex items-center justify-between">
             <div>
               <label class="input-label mb-0">{{ t('admin.accounts.quotaControl.tlsFingerprint.label') }}</label>
@@ -2162,7 +2237,7 @@
         </div>
 
         <!-- Session ID Masking -->
-        <div class="rounded-lg border border-gray-200 p-4 dark:border-dark-600">
+        <div v-if="supportsAnthropicQuotaControl" class="rounded-lg border border-gray-200 p-4 dark:border-dark-600">
           <div class="flex items-center justify-between">
             <div>
               <label class="input-label mb-0">{{ t('admin.accounts.quotaControl.sessionIdMasking.label') }}</label>
@@ -2189,7 +2264,7 @@
         </div>
 
         <!-- Cache TTL Override -->
-        <div class="rounded-lg border border-gray-200 p-4 dark:border-dark-600">
+        <div v-if="supportsAnthropicQuotaControl" class="rounded-lg border border-gray-200 p-4 dark:border-dark-600">
           <div class="flex items-center justify-between">
             <div>
               <label class="input-label mb-0">{{ t('admin.accounts.quotaControl.cacheTTLOverride.label') }}</label>
@@ -2229,7 +2304,7 @@
         </div>
 
         <!-- Custom Base URL Relay -->
-        <div class="rounded-lg border border-gray-200 p-4 dark:border-dark-600">
+        <div v-if="supportsAnthropicQuotaControl" class="rounded-lg border border-gray-200 p-4 dark:border-dark-600">
           <div class="flex items-center justify-between">
             <div>
               <label class="input-label mb-0">{{ t('admin.accounts.quotaControl.customBaseUrl.label') }}</label>
@@ -2487,6 +2562,13 @@ interface TempUnschedRuleForm {
 const submitting = ref(false)
 const editBaseUrl = ref('https://api.anthropic.com')
 const editApiKey = ref('')
+const editCopilotBillingUsername = ref('')
+const editCopilotBillingPAT = ref('')
+const copilotBillingValidating = ref(false)
+const copilotBillingValidationOk = ref(false)
+const copilotBillingValidationMessage = ref('')
+const editCopilotBillingCreditLimit = ref<number | null>(20000)
+const editCopilotBillingAutoPauseDisabled = ref(false)
 // Bedrock credentials
 const editBedrockAccessKeyId = ref('')
 const editBedrockSecretAccessKey = ref('')
@@ -2511,6 +2593,30 @@ const DEFAULT_POOL_MODE_RETRY_STATUS_CODES = [401, 403, 429]
 const poolModeEnabled = ref(false)
 const poolModeRetryCount = ref(DEFAULT_POOL_MODE_RETRY_COUNT)
 const poolModeRetryStatusCodesInput = ref('')
+
+const validateCopilotBillingPAT = async () => {
+  const username = editCopilotBillingUsername.value.trim()
+  const token = editCopilotBillingPAT.value.trim()
+  if (!username || !token) {
+    appStore.showError('请先填写 GitHub 用户名和新的 Billing PAT')
+    return
+  }
+  copilotBillingValidating.value = true
+  copilotBillingValidationOk.value = false
+  copilotBillingValidationMessage.value = ''
+  try {
+    const result = await adminAPI.accounts.validateCopilotBillingPAT({ username, token })
+    copilotBillingValidationOk.value = true
+    copilotBillingValidationMessage.value =
+      `验证通过：本月 ${Number(result.gross_quantity || 0).toFixed(2)} AI Credits，标准金额 $${Number(result.gross_amount || 0).toFixed(2)}`
+  } catch (error: any) {
+    copilotBillingValidationMessage.value =
+      error.response?.data?.message || error.response?.data?.detail || error.message || '验证失败，PAT 无法读取账单或已过期'
+    appStore.showError(copilotBillingValidationMessage.value)
+  } finally {
+    copilotBillingValidating.value = false
+  }
+}
 
 function parsePoolModeRetryStatusCodes(input: string): number[] {
   if (!input || !input.trim()) return []
@@ -2574,7 +2680,7 @@ const mixedChannelWarningRawMessage = ref('')
 const mixedChannelWarningAction = ref<(() => Promise<void>) | null>(null)
 const antigravityMixedChannelConfirmed = ref(false)
 
-// Quota control state (Anthropic OAuth/SetupToken only)
+// Quota control state
 const windowCostEnabled = ref(false)
 const windowCostLimit = ref<number | null>(null)
 const windowCostStickyReserve = ref<number | null>(null)
@@ -2599,6 +2705,40 @@ const cacheTTLOverrideEnabled = ref(false)
 const cacheTTLOverrideTarget = ref<string>('5m')
 const customBaseUrlEnabled = ref(false)
 const customBaseUrl = ref('')
+const supportsAnthropicQuotaControl = computed(
+  () => props.account?.platform === 'anthropic' && (props.account?.type === 'oauth' || props.account?.type === 'setup-token')
+)
+const supportsWindowCostControl = computed(
+  () => supportsAnthropicQuotaControl.value || props.account?.platform === 'copilot'
+)
+
+const applyWindowCostExtra = (extra: Record<string, unknown>) => {
+  if (windowCostEnabled.value && windowCostLimit.value != null && windowCostLimit.value > 0) {
+    extra.window_cost_limit = windowCostLimit.value
+    extra.window_cost_sticky_reserve = windowCostStickyReserve.value ?? 10
+  } else {
+    delete extra.window_cost_limit
+    delete extra.window_cost_sticky_reserve
+  }
+}
+
+const applyCopilotBillingGuardExtra = (extra: Record<string, unknown>) => {
+  if (props.account?.platform !== 'copilot') {
+    delete extra.billing_credit_limit
+    delete extra.billing_auto_pause_disabled
+    return
+  }
+  if (editCopilotBillingCreditLimit.value != null && editCopilotBillingCreditLimit.value > 0) {
+    extra.billing_credit_limit = editCopilotBillingCreditLimit.value
+  } else {
+    delete extra.billing_credit_limit
+  }
+  if (editCopilotBillingAutoPauseDisabled.value) {
+    extra.billing_auto_pause_disabled = true
+  } else {
+    delete extra.billing_auto_pause_disabled
+  }
+}
 
 // OpenAI 自动透传开关（OAuth/API Key）
 const openaiPassthroughEnabled = ref(false)
@@ -3127,8 +3267,16 @@ const syncFormFromAccount = (newAccount: Account | null) => {
         ? 'https://api.openai.com'
         : newAccount.platform === 'gemini'
           ? 'https://generativelanguage.googleapis.com'
+          : newAccount.platform === 'copilot'
+            ? 'https://api.individual.githubcopilot.com'
           : 'https://api.anthropic.com'
     editBaseUrl.value = (credentials.base_url as string) || platformDefaultUrl
+    if (newAccount.platform === 'copilot') {
+      editCopilotBillingUsername.value = (credentials.billing_username as string) || ''
+      editCopilotBillingPAT.value = ''
+      copilotBillingValidationOk.value = false
+      copilotBillingValidationMessage.value = ''
+    }
 
     // Load model mappings and detect mode
     loadModelRestrictionFromMapping(credentials.model_mapping as Record<string, unknown> | undefined)
@@ -3485,22 +3633,28 @@ function loadQuotaControlSettings(account: Account) {
   cacheTTLOverrideTarget.value = '5m'
   customBaseUrlEnabled.value = false
   customBaseUrl.value = ''
+  editCopilotBillingCreditLimit.value = 20000
+  editCopilotBillingAutoPauseDisabled.value = false
 
-  // Remaining quota control settings only apply to Anthropic accounts
-  if (account.platform !== 'anthropic') {
+  if (account.platform !== 'copilot' && (account.platform !== 'anthropic' || (account.type !== 'oauth' && account.type !== 'setup-token'))) {
     return
   }
 
-  // Window cost / session limit only apply to Anthropic OAuth/SetupToken accounts
-  if (account.type !== 'oauth' && account.type !== 'setup-token') {
-    return
+  if (account.platform === 'copilot') {
+    const extra = (account.extra || {}) as Record<string, unknown>
+    const limit = Number(extra.billing_credit_limit)
+    editCopilotBillingCreditLimit.value = Number.isFinite(limit) && limit > 0 ? limit : 20000
+    editCopilotBillingAutoPauseDisabled.value = extra.billing_auto_pause_disabled === true
   }
 
-  // Load from extra field (via backend DTO fields)
   if (account.window_cost_limit != null && account.window_cost_limit > 0) {
     windowCostEnabled.value = true
     windowCostLimit.value = account.window_cost_limit
     windowCostStickyReserve.value = account.window_cost_sticky_reserve ?? 10
+  }
+
+  if (account.platform !== 'anthropic') {
+    return
   }
 
   if (account.max_sessions != null && account.max_sessions > 0) {
@@ -3740,6 +3894,16 @@ const handleSubmit = async () => {
       } else if (!hasExistingApiKey) {
         appStore.showError(t('admin.accounts.apiKeyIsRequired'))
         return
+      }
+      if (props.account.platform === 'copilot') {
+        if (editCopilotBillingUsername.value.trim()) {
+          newCredentials.billing_username = editCopilotBillingUsername.value.trim()
+        } else {
+          delete newCredentials.billing_username
+        }
+        if (editCopilotBillingPAT.value.trim()) {
+          newCredentials.billing_pat = editCopilotBillingPAT.value.trim()
+        }
       }
 
       // Add model mapping if configured（OpenAI 开启自动透传时保留现有映射，不再编辑）
@@ -4003,19 +4167,16 @@ const handleSubmit = async () => {
       updatePayload.extra = newExtra
     }
 
-    // For Anthropic OAuth/SetupToken accounts, handle quota control settings in extra
-    if (props.account.platform === 'anthropic' && (props.account.type === 'oauth' || props.account.type === 'setup-token')) {
+    // For local window-cost capable accounts, handle window cost settings in extra
+    if (props.account.platform === 'copilot' || (props.account.platform === 'anthropic' && (props.account.type === 'oauth' || props.account.type === 'setup-token'))) {
       const currentExtra = (updatePayload.extra as Record<string, unknown>) || (props.account.extra as Record<string, unknown>) || {}
       const newExtra: Record<string, unknown> = { ...currentExtra }
 
-      // Window cost limit settings
-      if (windowCostEnabled.value && windowCostLimit.value != null && windowCostLimit.value > 0) {
-        newExtra.window_cost_limit = windowCostLimit.value
-        newExtra.window_cost_sticky_reserve = windowCostStickyReserve.value ?? 10
+      applyWindowCostExtra(newExtra)
+
+      if (props.account.platform !== 'anthropic') {
+        updatePayload.extra = newExtra
       } else {
-        delete newExtra.window_cost_limit
-        delete newExtra.window_cost_sticky_reserve
-      }
 
       // Session limit settings
       if (sessionLimitEnabled.value && maxSessions.value != null && maxSessions.value > 0) {
@@ -4091,6 +4252,7 @@ const handleSubmit = async () => {
       }
 
       updatePayload.extra = newExtra
+      }
     }
 
     // For Anthropic API Key accounts, handle passthrough mode + web search emulation in extra
@@ -4239,6 +4401,10 @@ const handleSubmit = async () => {
         newExtra.quota_reset_timezone = editResetTimezone.value || 'UTC'
       } else {
         delete newExtra.quota_reset_timezone
+      }
+      if (props.account.platform === 'copilot') {
+        applyWindowCostExtra(newExtra)
+        applyCopilotBillingGuardExtra(newExtra)
       }
       // Quota notify config
       writeQuotaNotifyToExtra(newExtra, 'update')
