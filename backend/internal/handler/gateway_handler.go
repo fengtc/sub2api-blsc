@@ -41,6 +41,7 @@ type GatewayHandler struct {
 	gatewayService            *service.GatewayService
 	geminiCompatService       *service.GeminiMessagesCompatService
 	antigravityGatewayService *service.AntigravityGatewayService
+	copilotGatewayService     *service.CopilotGatewayService
 	userService               *service.UserService
 	billingCacheService       *service.BillingCacheService
 	usageService              *service.UsageService
@@ -61,6 +62,7 @@ func NewGatewayHandler(
 	gatewayService *service.GatewayService,
 	geminiCompatService *service.GeminiMessagesCompatService,
 	antigravityGatewayService *service.AntigravityGatewayService,
+	copilotGatewayService *service.CopilotGatewayService,
 	userService *service.UserService,
 	concurrencyService *service.ConcurrencyService,
 	billingCacheService *service.BillingCacheService,
@@ -96,6 +98,7 @@ func NewGatewayHandler(
 		gatewayService:            gatewayService,
 		geminiCompatService:       geminiCompatService,
 		antigravityGatewayService: antigravityGatewayService,
+		copilotGatewayService:     copilotGatewayService,
 		userService:               userService,
 		billingCacheService:       billingCacheService,
 		usageService:              usageService,
@@ -115,6 +118,8 @@ func NewGatewayHandler(
 // Messages handles Claude API compatible messages endpoint
 // POST /v1/messages
 func (h *GatewayHandler) Messages(c *gin.Context) {
+	requestStart := time.Now()
+
 	// 从context获取apiKey和user（ApiKeyAuth中间件已设置）
 	apiKey, ok := middleware2.GetAPIKeyFromContext(c)
 	if !ok {
@@ -625,6 +630,17 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			}
 			account := selection.Account
 			setOpsSelectedAccount(c, account.ID, account.Platform)
+			if skip, used, limit := shouldSkipCopilotAccountForBilling(c.Request.Context(), account); skip {
+				if selection.Acquired && selection.ReleaseFunc != nil {
+					selection.ReleaseFunc()
+				}
+				reqLog.Info("gateway.copilot_account_billing_credit_limited",
+					zap.Int64("account_id", account.ID),
+					zap.Float64("used_credits", used),
+					zap.Float64("credit_limit", limit))
+				fs.FailedAccountIDs[account.ID] = struct{}{}
+				continue
+			}
 
 			// [DEBUG-STICKY] 打印账号选择结果
 			reqLog.Info("sticky.account_selected",
@@ -790,8 +806,20 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			}
 			// 记录 Forward 前已写入字节数，Forward 后若增加则说明 SSE 内容已发，禁止 failover
 			writerSizeBeforeForward := c.Writer.Size()
+			copilotStatusCode := http.StatusOK
 			if account.Platform == service.PlatformAntigravity && account.Type != service.AccountTypeAPIKey {
 				result, err = h.antigravityGatewayService.Forward(requestCtx, c, account, attemptBody, hasBoundSession)
+			} else if account.Platform == service.PlatformCopilot {
+				if h.copilotGatewayService == nil {
+					err = errors.New("copilot gateway service is not configured")
+				} else {
+					copilotResult, copilotErr := h.copilotGatewayService.ForwardMessages(requestCtx, c, account, attemptBody)
+					err = copilotErr
+					if copilotResult != nil {
+						copilotStatusCode = copilotResult.StatusCode
+						result = copilotMessagesForwardResult(copilotResult, reqStream, time.Since(requestStart))
+					}
+				}
 			} else {
 				result, err = h.gatewayService.Forward(requestCtx, c, account, attemptParsedReq)
 			}
@@ -805,6 +833,9 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 
 			if accountReleaseFunc != nil {
 				accountReleaseFunc()
+			}
+			if err == nil && account.Platform == service.PlatformCopilot && copilotStatusCode != http.StatusOK {
+				return
 			}
 			if err != nil {
 				// Beta policy block: return 400 immediately, no failover

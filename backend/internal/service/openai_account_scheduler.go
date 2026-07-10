@@ -409,7 +409,7 @@ func (s *defaultOpenAIAccountScheduler) selectBySessionHash(
 		_ = s.service.deleteStickySessionAccountID(ctx, req.GroupID, sessionHash)
 		return nil, false, nil
 	}
-	if shouldClearStickySession(account, req.RequestedModel) || account.Platform != normalizeOpenAICompatiblePlatform(req.Platform) || !account.IsOpenAICompatible() || !account.IsSchedulable() {
+	if shouldClearStickySession(account, req.RequestedModel) || !account.IsOpenAICompatibleForRequest(req.RequiredCapability, req.RequiredImageCapability) || !account.IsSchedulable() {
 		_ = s.service.deleteStickySessionAccountID(ctx, req.GroupID, sessionHash)
 		return nil, false, nil
 	}
@@ -1105,7 +1105,7 @@ func (s *defaultOpenAIAccountScheduler) selectByLoadBalance(
 				continue
 			}
 		}
-		if !account.IsSchedulable() || account.Platform != normalizeOpenAICompatiblePlatform(req.Platform) || !account.IsOpenAICompatible() {
+		if !account.IsSchedulable() || !account.IsOpenAICompatibleForRequest(req.RequiredCapability, req.RequiredImageCapability) {
 			continue
 		}
 		if s.service.isOpenAIAccountRuntimeBlocked(account) {
@@ -1364,6 +1364,10 @@ func (s *defaultOpenAIAccountScheduler) lookupShadowParentAccount(ctx context.Co
 
 func (s *defaultOpenAIAccountScheduler) isAccountRequestCompatible(ctx context.Context, account *Account, req OpenAIAccountScheduleRequest) bool {
 	if account == nil {
+		return false
+	}
+	nativePlatform := normalizeOpenAICompatiblePlatform(req.Platform)
+	if account.Platform != nativePlatform && !(nativePlatform == PlatformOpenAI && account.Platform == PlatformCopilot) {
 		return false
 	}
 	if s != nil && s.service != nil && s.service.isOpenAIAccountRuntimeBlocked(account) {
@@ -1803,6 +1807,9 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 func accountSupportsOpenAICapabilities(account *Account, requiredCapability OpenAIEndpointCapability, requiredImageCapability OpenAIImagesCapability) bool {
 	if account == nil {
 		return false
+	}
+	if account.Platform == PlatformCopilot {
+		return requiredCapability == OpenAIEndpointCapabilityChatCompletions && requiredImageCapability == ""
 	}
 	return account.SupportsOpenAIEndpointCapability(requiredCapability) &&
 		account.SupportsOpenAIImageCapability(requiredImageCapability)

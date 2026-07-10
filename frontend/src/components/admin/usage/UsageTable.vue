@@ -164,10 +164,34 @@
           </div>
         </template>
 
+        <template #cell-cache_creation_tokens="{ row }">
+          <span class="text-sm tabular-nums text-amber-600 dark:text-amber-400">
+            {{ row.cache_creation_tokens?.toLocaleString() || 0 }}
+          </span>
+        </template>
+
+        <template #cell-cache_read_tokens="{ row }">
+          <span class="text-sm tabular-nums text-sky-600 dark:text-sky-400">
+            {{ row.cache_read_tokens?.toLocaleString() || 0 }}
+          </span>
+        </template>
+
+        <template #cell-cache_creation_cost="{ row }">
+          <span class="text-sm tabular-nums text-gray-700 dark:text-gray-300">
+            {{ formatUsdWithCny(row.cache_creation_cost ?? 0, 6) }}
+          </span>
+        </template>
+
+        <template #cell-cache_read_cost="{ row }">
+          <span class="text-sm tabular-nums text-gray-700 dark:text-gray-300">
+            {{ formatUsdWithCny(row.cache_read_cost ?? 0, 6) }}
+          </span>
+        </template>
+
         <template #cell-cost="{ row }">
           <div class="text-sm">
             <div class="flex items-center gap-1.5">
-              <span class="font-medium text-green-600 dark:text-green-400">${{ row.actual_cost?.toFixed(6) || '0.000000' }}</span>
+              <span class="font-medium text-green-600 dark:text-green-400">{{ formatUsdWithCny(row.actual_cost ?? 0, 6) }}</span>
               <!-- Cost Detail Tooltip -->
               <div
                 class="group relative"
@@ -180,7 +204,7 @@
               </div>
             </div>
             <div v-if="showAccountBilling && row.account_rate_multiplier != null" class="mt-0.5 text-[11px] text-orange-500 dark:text-orange-400">
-              A ${{ accountBilled(row).toFixed(6) }}
+              A {{ formatUsdWithCny(accountBilled(row), 6) }}
             </div>
           </div>
         </template>
@@ -372,24 +396,24 @@
               </div>
               <div class="flex items-center justify-between gap-4">
                 <span class="text-gray-400">{{ t('usage.imageUnitPrice') }}</span>
-                <span class="font-medium text-sky-300">${{ imageUnitPrice(tooltipData).toFixed(6) }}</span>
+                <span class="font-medium text-sky-300">{{ formatUsdWithCny(imageUnitPrice(tooltipData), 6) }}</span>
               </div>
               <div class="flex items-center justify-between gap-4">
                 <span class="text-gray-400">{{ t('usage.imageTotalPrice') }}</span>
-                <span class="font-medium text-white">${{ tooltipData.total_cost?.toFixed(6) || '0.000000' }}</span>
+                <span class="font-medium text-white">{{ formatUsdWithCny(tooltipData.total_cost ?? 0, 6) }}</span>
               </div>
             </template>
             <div v-else class="flex items-center justify-between gap-4">
               <span class="text-gray-400">{{ t('usage.unitPrice') }}</span>
-              <span class="font-medium text-sky-300">${{ tooltipData?.total_cost?.toFixed(6) || '0.000000' }}</span>
+              <span class="font-medium text-sky-300">{{ formatUsdWithCny(tooltipData?.total_cost ?? 0, 6) }}</span>
             </div>
             <div v-if="tooltipData && tooltipData.cache_creation_cost > 0" class="flex items-center justify-between gap-4">
               <span class="text-gray-400">{{ t('admin.usage.cacheCreationCost') }}</span>
-              <span class="font-medium text-white">${{ tooltipData.cache_creation_cost.toFixed(6) }}</span>
+              <span class="font-medium text-white">{{ formatUsdWithCny(tooltipData.cache_creation_cost, 6) }}</span>
             </div>
             <div v-if="tooltipData && tooltipData.cache_read_cost > 0" class="flex items-center justify-between gap-4">
               <span class="text-gray-400">{{ t('admin.usage.cacheReadCost') }}</span>
-              <span class="font-medium text-white">${{ tooltipData.cache_read_cost.toFixed(6) }}</span>
+              <span class="font-medium text-white">{{ formatUsdWithCny(tooltipData.cache_read_cost, 6) }}</span>
             </div>
           </div>
           <!-- Rate and Summary -->
@@ -403,11 +427,11 @@
           </div>
           <div class="flex items-center justify-between gap-6">
             <span class="text-gray-400">{{ t('usage.original') }}</span>
-            <span class="font-medium text-white">${{ tooltipData?.total_cost?.toFixed(6) || '0.000000' }}</span>
+            <span class="font-medium text-white">{{ formatUsdWithCny(tooltipData?.total_cost ?? 0, 6) }}</span>
           </div>
           <div class="flex items-center justify-between gap-6">
             <span class="text-gray-400">{{ t('usage.userBilled') }}</span>
-            <span class="font-semibold text-green-400">${{ tooltipData?.actual_cost?.toFixed(6) || '0.000000' }}</span>
+            <span class="font-semibold text-green-400">{{ formatUsdWithCny(tooltipData?.actual_cost ?? 0, 6) }}</span>
           </div>
           <!-- Account billing (separated from user billing) -->
           <template v-if="showAccountBilling">
@@ -418,11 +442,11 @@
             <div class="flex items-center justify-between gap-6">
               <span class="text-gray-400">{{ t('usage.accountBilled') }}</span>
               <span class="font-semibold text-green-400">
-                ${{ accountBilled({
+                {{ formatUsdWithCny(accountBilled({
                   total_cost: tooltipData?.total_cost,
                   account_stats_cost: tooltipData?.account_stats_cost,
                   account_rate_multiplier: tooltipData?.account_rate_multiplier,
-                }).toFixed(6) }}
+                }), 6) }}
               </span>
             </div>
           </template>
@@ -436,7 +460,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { formatDateTime, formatReasoningEffort } from '@/utils/format'
+import { formatDateTime, formatReasoningEffort, formatUsdWithCny } from '@/utils/format'
 import { formatCacheTokens, formatMultiplier } from '@/utils/formatters'
 import { formatTokenPricePerMillion } from '@/utils/usagePricing'
 import { getUsageServiceTierLabel } from '@/utils/usageServiceTier'

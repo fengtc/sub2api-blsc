@@ -237,6 +237,28 @@ export default {
     }
   },
 
+  modelPlaza: {
+    title: '模型广场',
+    description: '查看可直接填写的模型名称',
+    searchPlaceholder: '搜索模型、厂家或上游名称...',
+    allProviders: '全部厂家',
+    modelCount: '共 {count} 个模型',
+    copyModel: '复制模型名',
+    copied: '模型名已复制',
+    empty: '没有匹配的模型',
+    columns: {
+      model: '精确模型名',
+      provider: '厂家',
+      endpoint: '接口',
+      upstream: '上游模型',
+    },
+  },
+
+  userGuide: {
+    title: '使用文档',
+    description: 'OIDC 登录、API Key 创建和接口连通验证说明',
+  },
+
   // Usage
   usage: {
     title: '使用记录',
@@ -253,6 +275,7 @@ export default {
     cacheBreakdown: '缓存 Token 明细',
     cacheCreationTokensLabel: '缓存创建',
     cacheReadTokensLabel: '缓存读取',
+    cacheReadRate: '缓存命中率',
     totalCost: '总消费',
     standardCost: '标准',
     actualCost: '实际',

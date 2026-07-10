@@ -237,7 +237,21 @@ func (a *Account) IsGrokOAuth() bool {
 }
 
 func (a *Account) IsOpenAICompatible() bool {
-	return a != nil && (a.Platform == PlatformOpenAI || a.Platform == PlatformGrok)
+	return a != nil && (a.Platform == PlatformOpenAI || a.Platform == PlatformGrok || a.Platform == PlatformCopilot)
+}
+
+// IsOpenAICompatibleForRequest reports whether this account can serve the
+// requested OpenAI-compatible endpoint. Copilot only supports chat completions.
+func (a *Account) IsOpenAICompatibleForRequest(requiredCapability OpenAIEndpointCapability, requiredImageCapability OpenAIImagesCapability) bool {
+	if a == nil {
+		return false
+	}
+	if a.Platform == PlatformCopilot {
+		return requiredCapability == OpenAIEndpointCapabilityChatCompletions && requiredImageCapability == ""
+	}
+	return (a.IsOpenAI() || a.IsGrok()) &&
+		a.SupportsOpenAIEndpointCapability(requiredCapability) &&
+		a.SupportsOpenAIImageCapability(requiredImageCapability)
 }
 
 func (a *Account) GeminiOAuthType() string {
@@ -1775,6 +1789,12 @@ const (
 // 仅这两类账号支持 5h 窗口额度控制和会话数量控制
 func (a *Account) IsAnthropicOAuthOrSetupToken() bool {
 	return a.Platform == PlatformAnthropic && (a.Type == AccountTypeOAuth || a.Type == AccountTypeSetupToken)
+}
+
+// SupportsWindowCostControl reports whether the local rolling-window cost
+// limiter applies to the account.
+func (a *Account) SupportsWindowCostControl() bool {
+	return a != nil && (a.IsAnthropicOAuthOrSetupToken() || a.Platform == PlatformCopilot)
 }
 
 // IsTLSFingerprintEnabled 检查是否启用 TLS 指纹伪装

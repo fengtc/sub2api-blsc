@@ -22,6 +22,7 @@ const (
 	PlatformOpenAI      = "openai"
 	PlatformGemini      = "gemini"
 	PlatformAntigravity = "antigravity"
+	PlatformCopilot     = "copilot" // GitHub Copilot
 	PlatformGrok        = "grok"
 )
 
@@ -82,6 +83,7 @@ var DefaultAntigravityModelMapping = map[string]string{
 	"claude-opus-4-6-thinking":   "claude-opus-4-6-thinking", // 官方模型
 	"claude-opus-4-6":            "claude-opus-4-6-thinking", // 简称映射
 	"claude-opus-4-5-thinking":   "claude-opus-4-6-thinking", // 迁移旧模型
+	"claude-sonnet-5":            "claude-sonnet-5",
 	"claude-sonnet-4-6":          "claude-sonnet-4-6",
 	"claude-sonnet-4-5":          "claude-sonnet-4-5",
 	"claude-sonnet-4-5-thinking": "claude-sonnet-4-5-thinking",

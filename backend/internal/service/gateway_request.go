@@ -556,6 +556,58 @@ func FilterThinkingBlocks(body []byte, mappedModel string) []byte {
 	return filterThinkingBlocksInternal(body, false)
 }
 
+// SanitizeHistoricalThinkingBlocks proactively removes historical thinking blocks.
+//
+// Some clients replay assistant history from a different model/provider and include
+// thinking blocks whose signatures cannot be validated by the target Anthropic
+// upstream. The proxy cannot verify those signatures locally, so the only reliable
+// way to avoid upstream 400s is to strip/downgrade historical thinking before send.
+func SanitizeHistoricalThinkingBlocks(body []byte, mappedModel ...string) ([]byte, bool) {
+	if !bytes.Contains(body, []byte("thinking")) {
+		return body, false
+	}
+
+	jsonStr := *(*string)(unsafe.Pointer(&body))
+	modelID := ""
+	if len(mappedModel) > 0 {
+		modelID = mappedModel[0]
+	}
+	if modelID == "" {
+		modelID = gjson.Get(jsonStr, "model").String()
+	}
+	if modelID == "" {
+		modelID = "claude-unknown"
+	}
+
+	msgsRes := gjson.Get(jsonStr, "messages")
+	if !msgsRes.Exists() || !msgsRes.IsArray() {
+		return body, false
+	}
+
+	hasHistoricalThinking := false
+	msgsRes.ForEach(func(_, msg gjson.Result) bool {
+		content := msg.Get("content")
+		if !content.Exists() || !content.IsArray() {
+			return true
+		}
+		content.ForEach(func(_, block gjson.Result) bool {
+			blockType := block.Get("type").String()
+			if blockType == "thinking" || blockType == "redacted_thinking" || block.Get("thinking").Exists() {
+				hasHistoricalThinking = true
+				return false
+			}
+			return true
+		})
+		return !hasHistoricalThinking
+	})
+	if !hasHistoricalThinking {
+		return body, false
+	}
+
+	out := FilterThinkingBlocksForRetry(body, modelID)
+	return out, !bytes.Equal(out, body)
+}
+
 // FilterThinkingBlocksForRetry strips thinking-related constructs for retry scenarios.
 //
 // Why:
@@ -698,7 +750,7 @@ func FilterThinkingBlocksForRetry(body []byte, mappedModel string) []byte {
 				modifiedThisMsg = true
 				ensureNewContent(bi)
 				thinkingText, _ := blockMap["thinking"].(string)
-				if thinkingText != "" {
+				if strings.TrimSpace(thinkingText) != "" {
 					newContent = append(newContent, map[string]any{"type": "text", "text": thinkingText})
 				}
 				continue
@@ -715,7 +767,7 @@ func FilterThinkingBlocksForRetry(body []byte, mappedModel string) []byte {
 					ensureNewContent(bi)
 					switch v := rawThinking.(type) {
 					case string:
-						if v != "" {
+						if strings.TrimSpace(v) != "" {
 							newContent = append(newContent, map[string]any{"type": "text", "text": v})
 						}
 					default:

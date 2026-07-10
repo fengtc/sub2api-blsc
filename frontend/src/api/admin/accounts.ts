@@ -20,7 +20,8 @@ import type {
   CodexSessionImportResult,
   OpenAICodexPATCreateRequest,
   CheckMixedChannelRequest,
-  CheckMixedChannelResponse
+  CheckMixedChannelResponse,
+  CopilotQuotaInfo
 } from '@/types'
 
 /**
@@ -156,6 +157,27 @@ export async function checkMixedChannelRisk(
   payload: CheckMixedChannelRequest
 ): Promise<CheckMixedChannelResponse> {
   const { data } = await apiClient.post<CheckMixedChannelResponse>('/admin/accounts/check-mixed-channel', payload)
+  return data
+}
+
+export interface ValidateCopilotBillingPATResult {
+  valid: boolean
+  username: string
+  period?: Record<string, unknown>
+  items_count: number
+  gross_quantity: number
+  gross_amount: number
+  net_amount: number
+}
+
+export async function validateCopilotBillingPAT(params: {
+  username: string
+  token: string
+}): Promise<ValidateCopilotBillingPATResult> {
+  const { data } = await apiClient.post<ValidateCopilotBillingPATResult>(
+    '/admin/accounts/copilot-billing-pat/validate',
+    params
+  )
   return data
 }
 
@@ -804,6 +826,11 @@ export async function createSparkShadow(parentId: number, payload: SparkShadowCr
   return data
 }
 
+export async function getCopilotQuota(id: number): Promise<CopilotQuotaInfo> {
+  const { data } = await apiClient.get<CopilotQuotaInfo>(`/admin/accounts/${id}/copilot-quota`)
+  return data
+}
+
 export const accountsAPI = {
   list,
   listWithEtag,
@@ -811,6 +838,7 @@ export const accountsAPI = {
   create,
   update,
   checkMixedChannelRisk,
+  validateCopilotBillingPAT,
   delete: deleteAccount,
   toggleStatus,
   testAccount,
@@ -849,7 +877,8 @@ export const accountsAPI = {
   revertProxyFallback,
   queryOpenAIQuota,
   resetOpenAIQuota,
-  createSparkShadow
+  createSparkShadow,
+  getCopilotQuota
 }
 
 export default accountsAPI

@@ -153,24 +153,6 @@
                   {{ t('nav.apiKeys') }}
                 </router-link>
 
-                <a
-                  v-if="authStore.isAdmin"
-                  href="https://github.com/Wei-Shaw/sub2api"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  @click="closeDropdown"
-                  class="dropdown-item"
-                >
-                  <svg class="h-4 w-4" fill="currentColor" viewBox="0 0 24 24">
-                    <path
-                      fill-rule="evenodd"
-                      clip-rule="evenodd"
-                      d="M12 2C6.477 2 2 6.477 2 12c0 4.42 2.865 8.17 6.839 9.49.5.092.682-.217.682-.482 0-.237-.008-.866-.013-1.7-2.782.604-3.369-1.34-3.369-1.34-.454-1.156-1.11-1.464-1.11-1.464-.908-.62.069-.608.069-.608 1.003.07 1.531 1.03 1.531 1.03.892 1.529 2.341 1.087 2.91.831.092-.646.35-1.086.636-1.336-2.22-.253-4.555-1.11-4.555-4.943 0-1.091.39-1.984 1.029-2.683-.103-.253-.446-1.27.098-2.647 0 0 .84-.269 2.75 1.025A9.578 9.578 0 0112 6.836c.85.004 1.705.114 2.504.336 1.909-1.294 2.747-1.025 2.747-1.025.546 1.377.203 2.394.1 2.647.64.699 1.028 1.592 1.028 2.683 0 3.842-2.339 4.687-4.566 4.935.359.309.678.919.678 1.852 0 1.336-.012 2.415-.012 2.743 0 .267.18.578.688.48C19.138 20.167 22 16.418 22 12c0-5.523-4.477-10-10-10z"
-                    />
-                  </svg>
-                  {{ t('nav.github') }}
-                </a>
-
               </div>
 
               <!-- Contact Support (only show if configured) -->
@@ -199,6 +181,11 @@
                 </div>
               </div>
 
+              <!--
+                Replaying the onboarding guide is intentionally hidden from the user menu.
+                Keep this block for easy restoration if the guide entry needs to return.
+              -->
+              <!--
               <div v-if="showOnboardingButton" class="border-t border-gray-100 py-1 dark:border-dark-700">
                 <button @click="handleReplayGuide" class="dropdown-item w-full">
                   <svg class="h-4 w-4" fill="currentColor" viewBox="0 0 24 24">
@@ -209,6 +196,7 @@
                   {{ $t('onboarding.restartTour') }}
                 </button>
               </div>
+              -->
 
               <div class="border-t border-gray-100 py-1 dark:border-dark-700">
                 <button
@@ -243,7 +231,7 @@
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { useAppStore, useAuthStore, useOnboardingStore } from '@/stores'
+import { useAppStore, useAuthStore } from '@/stores'
 import { useAdminSettingsStore } from '@/stores/adminSettings'
 import LocaleSwitcher from '@/components/common/LocaleSwitcher.vue'
 import SubscriptionProgressMini from '@/components/common/SubscriptionProgressMini.vue'
@@ -257,7 +245,9 @@ const { t } = useI18n()
 const appStore = useAppStore()
 const authStore = useAuthStore()
 const adminSettingsStore = useAdminSettingsStore()
-const onboardingStore = useOnboardingStore()
+// Onboarding replay entry is hidden from the user menu. Restore this store when
+// re-enabling the commented menu block above.
+// const onboardingStore = useOnboardingStore()
 
 const user = computed(() => authStore.user)
 const dropdownOpen = ref(false)
@@ -273,10 +263,10 @@ const balanceFrozenText = computed(() => t('common.frozenBalance') === 'common.f
 const balanceTotalText = computed(() => t('common.totalBalance') === 'common.totalBalance' ? '总余额' : t('common.totalBalance'))
 const balanceFrozenLabel = computed(() => `${balanceFrozenText.value} ${formatHeaderMoney(frozenBalance.value)}`)
 
-// 只在标准模式的管理员下显示新手引导按钮
-const showOnboardingButton = computed(() => {
-  return !authStore.isSimpleMode && user.value?.role === 'admin'
-})
+// 只在标准模式的管理员下显示新手引导按钮（当前入口已隐藏，保留条件便于恢复）
+// const showOnboardingButton = computed(() => {
+//   return !authStore.isSimpleMode && user.value?.role === 'admin'
+// })
 
 const userInitials = computed(() => {
   if (!user.value) return ''
@@ -344,10 +334,10 @@ async function handleLogout() {
   await router.push('/login')
 }
 
-function handleReplayGuide() {
-  closeDropdown()
-  onboardingStore.replay()
-}
+// function handleReplayGuide() {
+//   closeDropdown()
+//   onboardingStore.replay()
+// }
 
 function formatHeaderMoney(value: number) {
   if (!Number.isFinite(value)) return '$0.00'

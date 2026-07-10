@@ -191,7 +191,11 @@ func openAICompactSupportTier(account *Account) int {
 // 检查母账号凭据可用性；该检查未内置于本函数，以避免注入 DB 依赖。
 func isOpenAICompatibleAccountEligibleForRequest(ctx context.Context, account *Account, platform string, requestedModel string, requireCompact bool, requiredCapability OpenAIEndpointCapability) bool {
 	platform = normalizeOpenAICompatiblePlatform(platform)
-	if account == nil || account.Platform != platform || !account.IsOpenAICompatible() || !account.IsSchedulableForModelWithContext(ctx, requestedModel) {
+	if account == nil || !account.IsSchedulableForModelWithContext(ctx, requestedModel) {
+		return false
+	}
+	platformMatches := account.Platform == platform || (platform == PlatformOpenAI && account.Platform == PlatformCopilot)
+	if !platformMatches || !account.IsOpenAICompatible() {
 		return false
 	}
 	if account.IsOpenAI() {
@@ -221,7 +225,7 @@ func isOpenAICompatibleAccountEligibleForRequest(ctx context.Context, account *A
 	if requestedModel != "" && !account.IsModelSupported(requestedModel) {
 		return false
 	}
-	if !account.SupportsOpenAIEndpointCapability(requiredCapability) {
+	if !accountSupportsOpenAICapabilities(account, requiredCapability, "") {
 		return false
 	}
 	if requireCompact && (!account.IsOpenAI() || openAICompactSupportTier(account) == 0) {
@@ -1118,7 +1122,32 @@ func (s *OpenAIGatewayService) listSchedulableAccounts(ctx context.Context, grou
 	if err != nil {
 		return nil, fmt.Errorf("query accounts failed: %w", err)
 	}
+	if platform == PlatformOpenAI {
+		accounts = append(accounts, s.listSchedulableCopilotAccountsBestEffort(ctx, groupID)...)
+	}
 	return accounts, nil
+}
+
+func (s *OpenAIGatewayService) listSchedulableCopilotAccountsBestEffort(ctx context.Context, groupID *int64) []Account {
+	if s == nil || s.accountRepo == nil {
+		return nil
+	}
+	var (
+		accounts []Account
+		err      error
+	)
+	if s.cfg != nil && s.cfg.RunMode == config.RunModeSimple {
+		accounts, err = s.accountRepo.ListSchedulableByPlatform(ctx, PlatformCopilot)
+	} else if groupID != nil {
+		accounts, err = s.accountRepo.ListSchedulableByGroupIDAndPlatform(ctx, *groupID, PlatformCopilot)
+	} else {
+		accounts, err = s.accountRepo.ListSchedulableUngroupedByPlatform(ctx, PlatformCopilot)
+	}
+	if err != nil {
+		slog.Debug("openai_scheduling_list_copilot_failed", "error", err)
+		return nil
+	}
+	return accounts
 }
 
 func (s *OpenAIGatewayService) tryAcquireAccountSlot(ctx context.Context, accountID int64, maxConcurrency int) (*AcquireResult, error) {

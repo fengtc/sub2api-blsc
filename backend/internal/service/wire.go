@@ -602,7 +602,7 @@ var ProviderSet = wire.NewSet(
 	NewAntigravityGatewayService,
 	ProvideRateLimitService,
 	NewAccountUsageService,
-	NewAccountTestService,
+	ProvideAccountTestService,
 	ProvideSettingService,
 	NewDataManagementService,
 	ProvideBackupService,
@@ -660,7 +660,29 @@ var ProviderSet = wire.NewSet(
 	ProvideChannelMonitorRunner,
 	NewChannelMonitorRequestTemplateService,
 	ProvideUserPlatformQuotaUsageFlusher,
+	NewCopilotTokenProvider,
+	ProvideCopilotGatewayService,
+	NewCopilotOAuthService,
 )
+
+func ProvideAccountTestService(
+	accountRepo AccountRepository,
+	geminiTokenProvider *GeminiTokenProvider,
+	claudeTokenProvider *ClaudeTokenProvider,
+	grokTokenProvider *GrokTokenProvider,
+	antigravityGatewayService *AntigravityGatewayService,
+	copilotTokenProvider *CopilotTokenProvider,
+	httpUpstream HTTPUpstream,
+	cfg *config.Config,
+	tlsFPProfileService *TLSFingerprintProfileService,
+) *AccountTestService {
+	return NewAccountTestService(accountRepo, geminiTokenProvider, claudeTokenProvider, grokTokenProvider,
+		antigravityGatewayService, copilotTokenProvider, httpUpstream, cfg, tlsFPProfileService)
+}
+
+func ProvideCopilotGatewayService(tokenProvider *CopilotTokenProvider, cfg *config.Config) *CopilotGatewayService {
+	return NewCopilotGatewayService(tokenProvider, cfg)
+}
 
 // ProvideUserPlatformQuotaUsageFlusher 创建并启动 UserPlatformQuotaUsageFlusher。
 func ProvideUserPlatformQuotaUsageFlusher(cfg *config.Config, cache BillingCache, quotaRepo UserPlatformQuotaRepository, tw *TimingWheelService) *UserPlatformQuotaUsageFlusher {

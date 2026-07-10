@@ -42,6 +42,9 @@ func RegisterGatewayRoutes(
 	isOpenAIGatewayPlatform := func(c *gin.Context) bool {
 		return getGroupPlatform(c) == service.PlatformOpenAI
 	}
+	isCopilotGatewayPlatform := func(c *gin.Context) bool {
+		return getGroupPlatform(c) == service.PlatformCopilot
+	}
 	imagesHandler := func(c *gin.Context) {
 		switch getGroupPlatform(c) {
 		case service.PlatformOpenAI:
@@ -95,6 +98,10 @@ func RegisterGatewayRoutes(
 	{
 		// /v1/messages: auto-route based on group platform
 		gateway.POST("/messages", func(c *gin.Context) {
+			if isCopilotGatewayPlatform(c) {
+				h.CopilotGateway.Messages(c)
+				return
+			}
 			if isOpenAIResponsesCompatibleGatewayPlatform(c) {
 				h.OpenAIGateway.Messages(c)
 				return
@@ -125,6 +132,10 @@ func RegisterGatewayRoutes(
 		// /models endpoint with a client_version query and expect the ChatGPT
 		// Codex manifest format; other clients keep the OpenAI-style list.
 		gateway.GET("/models", func(c *gin.Context) {
+			if isCopilotGatewayPlatform(c) {
+				h.CopilotGateway.Models(c)
+				return
+			}
 			if isOpenAIGatewayPlatform(c) && c.Query("client_version") != "" {
 				h.OpenAIGateway.CodexModels(c)
 				return
@@ -152,6 +163,10 @@ func RegisterGatewayRoutes(
 		})
 		// OpenAI Chat Completions API: auto-route based on group platform
 		gateway.POST("/chat/completions", func(c *gin.Context) {
+			if isCopilotGatewayPlatform(c) {
+				h.CopilotGateway.ChatCompletions(c)
+				return
+			}
 			if isOpenAIResponsesCompatibleGatewayPlatform(c) {
 				h.OpenAIGateway.ChatCompletions(c)
 				return
@@ -227,6 +242,10 @@ func RegisterGatewayRoutes(
 	}
 	// OpenAI Chat Completions API（不带v1前缀的别名）— auto-route based on group platform
 	r.POST("/chat/completions", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, func(c *gin.Context) {
+		if isCopilotGatewayPlatform(c) {
+			h.CopilotGateway.ChatCompletions(c)
+			return
+		}
 		if isOpenAIResponsesCompatibleGatewayPlatform(c) {
 			h.OpenAIGateway.ChatCompletions(c)
 			return
@@ -282,6 +301,21 @@ func RegisterGatewayRoutes(
 		antigravityV1Beta.GET("/models", h.Gateway.GeminiV1BetaListModels)
 		antigravityV1Beta.GET("/models/:model", h.Gateway.GeminiV1BetaGetModel)
 		antigravityV1Beta.POST("/models/*modelAction", h.Gateway.GeminiV1BetaModels)
+	}
+
+	// Copilot 专用路由（强制只使用 Copilot 账号）。
+	copilotV1 := r.Group("/copilot/v1")
+	copilotV1.Use(bodyLimit)
+	copilotV1.Use(clientRequestID)
+	copilotV1.Use(opsErrorLogger)
+	copilotV1.Use(endpointNorm)
+	copilotV1.Use(middleware.ForcePlatform(service.PlatformCopilot))
+	copilotV1.Use(gin.HandlerFunc(apiKeyAuth))
+	copilotV1.Use(requireGroupAnthropic)
+	{
+		copilotV1.POST("/messages", h.CopilotGateway.Messages)
+		copilotV1.POST("/chat/completions", h.CopilotGateway.ChatCompletions)
+		copilotV1.GET("/models", h.CopilotGateway.Models)
 	}
 
 }

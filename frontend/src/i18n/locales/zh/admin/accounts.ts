@@ -222,6 +222,7 @@ export default {
         anthropic: 'Anthropic',
         gemini: 'Gemini',
         antigravity: 'Antigravity',
+        copilot: 'Copilot',
         grok: 'Grok',
       },
       types: {

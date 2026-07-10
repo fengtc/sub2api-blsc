@@ -150,6 +150,8 @@ export default {
     dashboard: '仪表盘',
     announcements: '公告',
     apiKeys: 'API 密钥',
+    modelPlaza: '模型广场',
+    userGuide: '使用文档',
     batchImage: '批量生图',
     usage: '使用记录',
     redeem: '兑换',

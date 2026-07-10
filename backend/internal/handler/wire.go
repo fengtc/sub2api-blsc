@@ -20,6 +20,7 @@ func ProvideAdminHandlers(
 	openaiOAuthHandler *admin.OpenAIOAuthHandler,
 	geminiOAuthHandler *admin.GeminiOAuthHandler,
 	antigravityOAuthHandler *admin.AntigravityOAuthHandler,
+	copilotOAuthHandler *admin.CopilotOAuthHandler,
 	grokOAuthHandler *admin.GrokOAuthHandler,
 	proxyHandler *admin.ProxyHandler,
 	redeemHandler *admin.RedeemHandler,
@@ -54,6 +55,7 @@ func ProvideAdminHandlers(
 		OpenAIOAuth:            openaiOAuthHandler,
 		GeminiOAuth:            geminiOAuthHandler,
 		AntigravityOAuth:       antigravityOAuthHandler,
+		CopilotOAuth:           copilotOAuthHandler,
 		GrokOAuth:              grokOAuthHandler,
 		Proxy:                  proxyHandler,
 		Redeem:                 redeemHandler,
@@ -110,6 +112,7 @@ func ProvideHandlers(
 	adminHandlers *AdminHandlers,
 	gatewayHandler *GatewayHandler,
 	openaiGatewayHandler *OpenAIGatewayHandler,
+	copilotGatewayHandler *CopilotGatewayHandler,
 	settingHandler *SettingHandler,
 	totpHandler *TotpHandler,
 	paymentHandler *PaymentHandler,
@@ -131,6 +134,7 @@ func ProvideHandlers(
 		Admin:            adminHandlers,
 		Gateway:          gatewayHandler,
 		OpenAIGateway:    openaiGatewayHandler,
+		CopilotGateway:   copilotGatewayHandler,
 		Setting:          settingHandler,
 		Totp:             totpHandler,
 		Payment:          paymentHandler,
@@ -138,6 +142,28 @@ func ProvideHandlers(
 		AvailableChannel: availableChannelHandler,
 		BatchImage:       batchImageHandler,
 	}
+}
+
+func ProvideAccountHandler(
+	adminService service.AdminService,
+	oauthService *service.OAuthService,
+	openaiOAuthService *service.OpenAIOAuthService,
+	geminiOAuthService *service.GeminiOAuthService,
+	antigravityOAuthService *service.AntigravityOAuthService,
+	rateLimitService *service.RateLimitService,
+	accountUsageService *service.AccountUsageService,
+	accountTestService *service.AccountTestService,
+	concurrencyService *service.ConcurrencyService,
+	crsSyncService *service.CRSSyncService,
+	sessionLimitCache service.SessionLimitCache,
+	rpmCache service.RPMCache,
+	tokenCacheInvalidator service.TokenCacheInvalidator,
+	copilotGatewayService *service.CopilotGatewayService,
+) *admin.AccountHandler {
+	return admin.NewAccountHandler(adminService, oauthService, openaiOAuthService, geminiOAuthService,
+		antigravityOAuthService, rateLimitService, accountUsageService, accountTestService,
+		concurrencyService, crsSyncService, sessionLimitCache, rpmCache, tokenCacheInvalidator,
+		copilotGatewayService)
 }
 
 // ProviderSet is the Wire provider set for all handlers
@@ -153,6 +179,7 @@ var ProviderSet = wire.NewSet(
 	NewChannelMonitorUserHandler,
 	NewGatewayHandler,
 	NewOpenAIGatewayHandler,
+	NewCopilotGatewayHandler,
 	NewTotpHandler,
 	ProvideSettingHandler,
 	NewPaymentHandler,
@@ -164,7 +191,7 @@ var ProviderSet = wire.NewSet(
 	admin.NewDashboardHandler,
 	admin.NewUserHandler,
 	admin.NewGroupHandler,
-	admin.NewAccountHandler,
+	ProvideAccountHandler,
 	admin.NewAnnouncementHandler,
 	admin.NewDataManagementHandler,
 	admin.NewBackupHandler,
@@ -172,6 +199,7 @@ var ProviderSet = wire.NewSet(
 	admin.NewOpenAIOAuthHandler,
 	admin.NewGeminiOAuthHandler,
 	admin.NewAntigravityOAuthHandler,
+	admin.NewCopilotOAuthHandler,
 	admin.NewGrokOAuthHandler,
 	admin.NewProxyHandler,
 	admin.NewRedeemHandler,

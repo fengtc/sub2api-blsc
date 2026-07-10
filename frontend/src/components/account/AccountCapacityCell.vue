@@ -32,6 +32,21 @@
     <QuotaBadge v-if="showDailyQuota" :used="account.quota_daily_used ?? 0" :limit="account.quota_daily_limit!" label="D" />
     <QuotaBadge v-if="showWeeklyQuota" :used="account.quota_weekly_used ?? 0" :limit="account.quota_weekly_limit!" label="W" />
     <QuotaBadge v-if="showTotalQuota" :used="account.quota_used ?? 0" :limit="account.quota_limit!" />
+
+    <!-- GitHub Copilot 官方账单用量 -->
+    <CapacityBadge
+      v-if="showCopilotBilling"
+      :color-class="copilotBillingClass"
+      :tooltip="copilotBillingTooltip"
+      :current="formatCredits(account.copilot_billing_usage?.gross_quantity)"
+      :max="formatCredits(copilotBillingCreditLimit)"
+      suffix="AI"
+    >
+      <svg class="h-2.5 w-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M4.5 5.25h15v13.5h-15z" />
+        <path stroke-linecap="round" stroke-linejoin="round" d="M7.5 9.75h9m-9 3h5.25" />
+      </svg>
+    </CapacityBadge>
   </div>
 </template>
 
@@ -65,8 +80,12 @@ const isAnthropicOAuthOrSetupToken = computed(() =>
   (props.account.type === 'oauth' || props.account.type === 'setup-token')
 )
 
+const supportsWindowCostControl = computed(() =>
+  isAnthropicOAuthOrSetupToken.value || props.account.platform === 'copilot'
+)
+
 const showWindowCost = computed(() =>
-  isAnthropicOAuthOrSetupToken.value &&
+  supportsWindowCostControl.value &&
   props.account.window_cost_limit != null &&
   props.account.window_cost_limit > 0
 )
@@ -175,6 +194,12 @@ const formatCost = (value: number | null | undefined) => {
   return value.toFixed(2)
 }
 
+const formatCredits = (value: number | null | undefined) => {
+  if (value === null || value === undefined) return '0'
+  if (value >= 1000) return `${(value / 1000).toFixed(value >= 10000 ? 1 : 2)}k`
+  return value.toFixed(value % 1 === 0 ? 0 : 2)
+}
+
 // ====== 配额 ======
 const isQuotaEligible = computed(() => props.account.type === 'apikey' || props.account.type === 'bedrock')
 
@@ -187,4 +212,32 @@ const showWeeklyQuota = computed(() =>
 const showTotalQuota = computed(() =>
   isQuotaEligible.value && props.account.quota_limit != null && props.account.quota_limit > 0
 )
+
+// ====== Copilot 官方账单 ======
+const showCopilotBilling = computed(() =>
+  props.account.platform === 'copilot' &&
+  props.account.copilot_billing_usage != null
+)
+
+const DEFAULT_COPILOT_BILLING_CREDIT_LIMIT = 20000
+const copilotBillingCreditLimit = computed(() => {
+  const configured = Number(props.account.extra?.billing_credit_limit)
+  return Number.isFinite(configured) && configured > 0
+    ? configured
+    : DEFAULT_COPILOT_BILLING_CREDIT_LIMIT
+})
+
+const copilotBillingClass = computed(() => {
+  const usage = props.account.copilot_billing_usage
+  if (!usage) return ''
+  if (usage.gross_quantity >= copilotBillingCreditLimit.value) return 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
+  if (usage.gross_quantity >= copilotBillingCreditLimit.value * 0.8) return 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400'
+  return 'bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-300'
+})
+
+const copilotBillingTooltip = computed(() => {
+  const usage = props.account.copilot_billing_usage
+  if (!usage) return ''
+  return `GitHub Billing ${usage.period} ${usage.username}: gross ${formatCredits(usage.gross_quantity)} / ${formatCredits(copilotBillingCreditLimit.value)} AI credits, net $${formatCost(usage.net_amount)}`
+})
 </script>

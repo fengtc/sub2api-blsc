@@ -891,6 +891,7 @@ export default {
         openai: 'OpenAI',
         gemini: 'Gemini',
         antigravity: 'Antigravity',
+        copilot: 'Copilot',
         grok: 'Grok',
       },
       deleteConfirm:

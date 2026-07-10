@@ -172,7 +172,8 @@
       </form>
     </div>
 
-    <!-- Footer -->
+    <!-- Registration link temporarily hidden. Restore this footer slot to reopen public signup. -->
+    <!--
     <template v-if="!backendModeEnabled" #footer>
       <p class="text-gray-500 dark:text-dark-400">
         {{ t('auth.dontHaveAccount') }}
@@ -184,6 +185,7 @@
         </router-link>
       </p>
     </template>
+    -->
   </AuthLayout>
 
   <!-- 2FA Modal -->
@@ -218,7 +220,7 @@ import { extractI18nErrorMessage } from '@/utils/apiError'
 import { clearAllAffiliateReferralCodes } from '@/utils/oauthAffiliate'
 
 const { t } = useI18n()
-const LOGIN_AGREEMENT_STORAGE_KEY = 'sub2api_login_agreement_consent'
+const LOGIN_AGREEMENT_STORAGE_KEY = 'ai_gateway_login_agreement_consent'
 
 // ==================== Router & Stores ====================
 

@@ -718,6 +718,7 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 	if s.cfg != nil && s.cfg.RunMode == config.RunModeSimple {
 		writeUsageLogBestEffort(ctx, s.usageLogRepo, usageLog, "service.gateway")
 		logger.LegacyPrintf("service.gateway", "[SIMPLE MODE] Usage recorded (not billed): user=%d, tokens=%d", usageLog.UserID, usageLog.TotalTokens())
+		s.refreshWindowCostCacheAfterUsage(ctx, account)
 		s.deferredService.ScheduleLastUsedUpdate(account.ID)
 		return nil
 	}
@@ -747,8 +748,32 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 		return billingErr
 	}
 	writeUsageLogBestEffort(ctx, s.usageLogRepo, usageLog, "service.gateway")
+	s.refreshWindowCostCacheAfterUsage(ctx, account)
 
 	return nil
+}
+
+func (s *GatewayService) refreshWindowCostCacheAfterUsage(ctx context.Context, account *Account) {
+	if s == nil || account == nil || !account.SupportsWindowCostControl() ||
+		account.GetWindowCostLimit() <= 0 || s.sessionLimitCache == nil || s.usageLogRepo == nil {
+		return
+	}
+	baseCtx := context.Background()
+	if ctx != nil {
+		baseCtx = context.WithoutCancel(ctx)
+	}
+	cacheCtx, cancel := context.WithTimeout(baseCtx, 3*time.Second)
+	defer cancel()
+	stats, err := s.usageLogRepo.GetAccountWindowStats(cacheCtx, account.ID, account.GetCurrentWindowStartTime())
+	if err != nil || stats == nil {
+		if err != nil {
+			slog.Debug("window_cost_refresh_failed", "account_id", account.ID, "error", err)
+		}
+		return
+	}
+	if err := s.sessionLimitCache.SetWindowCost(cacheCtx, account.ID, stats.StandardCost); err != nil {
+		slog.Debug("window_cost_cache_set_failed", "account_id", account.ID, "error", err)
+	}
 }
 
 // calculateRecordUsageCost 根据请求类型和选项计算费用。

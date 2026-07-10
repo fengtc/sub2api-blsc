@@ -1,5 +1,5 @@
 /**
- * Vue Router configuration for Sub2API frontend
+ * Vue Router configuration for AI Gateway frontend
  * Defines all application routes with lazy loading and navigation guards
  */
 
@@ -216,6 +216,30 @@ const routes: RouteRecordRaw[] = [
       title: 'Batch Image Guide',
       titleKey: 'batchImageGuide.title',
       descriptionKey: 'batchImageGuide.description'
+    }
+  },
+  {
+    path: '/models',
+    name: 'ModelPlaza',
+    component: () => import('@/views/user/ModelPlazaView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: false,
+      title: 'Model Plaza',
+      titleKey: 'modelPlaza.title',
+      descriptionKey: 'modelPlaza.description'
+    }
+  },
+  {
+    path: '/user-guide',
+    name: 'UserGuide',
+    component: () => import('@/views/user/UserGuideView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: false,
+      title: 'User Guide',
+      titleKey: 'userGuide.title',
+      descriptionKey: 'userGuide.description'
     }
   },
   {

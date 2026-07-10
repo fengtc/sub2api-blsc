@@ -187,6 +187,15 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 			}
 		}
 		account := selection.Account
+		// Copilot supports messages/chat-completions only. Anthropic mixed
+		// scheduling must not route Responses requests to it.
+		if account.Platform == service.PlatformCopilot {
+			if selection.Acquired && selection.ReleaseFunc != nil {
+				selection.ReleaseFunc()
+			}
+			fs.FailedAccountIDs[account.ID] = struct{}{}
+			continue
+		}
 		setOpsSelectedAccount(c, account.ID, account.Platform)
 
 		// 4. Acquire account concurrency slot

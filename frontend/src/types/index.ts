@@ -1,5 +1,5 @@
 /**
- * Core Type Definitions for Sub2API Frontend
+ * Core Type Definitions for AI Gateway Frontend
  */
 
 // ==================== Common Types ====================
@@ -492,7 +492,7 @@ export interface PaginationConfig {
 
 // ==================== API Key & Group Types ====================
 
-export type GroupPlatform = 'anthropic' | 'openai' | 'gemini' | 'antigravity' | 'grok'
+export type GroupPlatform = 'anthropic' | 'openai' | 'gemini' | 'antigravity' | 'copilot' | 'grok'
 
 export type SubscriptionType = 'standard' | 'subscription'
 
@@ -734,7 +734,7 @@ export interface UpdateGroupRequest {
 
 // ==================== Account & Proxy Types ====================
 
-export type AccountPlatform = 'anthropic' | 'openai' | 'gemini' | 'antigravity' | 'grok'
+export type AccountPlatform = 'anthropic' | 'openai' | 'gemini' | 'antigravity' | 'copilot' | 'grok'
 export type AccountType = 'oauth' | 'setup-token' | 'apikey' | 'upstream' | 'bedrock' | 'service_account'
 export type OAuthAddMethod = 'oauth' | 'setup-token'
 export type ProxyProtocol = 'http' | 'https' | 'socks5' | 'socks5h'
@@ -745,6 +745,20 @@ export interface ClaudeModel {
   type: string
   display_name: string
   created_at: string
+}
+
+export interface CopilotQuotaBucket {
+  entitlement?: number | null
+  used?: number | null
+}
+
+export interface CopilotQuotaInfo {
+  plan?: string
+  plan_type?: string
+  quota_reset_date?: string
+  premium_interactions?: CopilotQuotaBucket | null
+  chat?: CopilotQuotaBucket | null
+  completions?: CopilotQuotaBucket | null
 }
 
 export interface Proxy {
@@ -969,6 +983,7 @@ export interface Account {
   current_window_cost?: number | null // 当前窗口费用
   active_sessions?: number | null // 当前活跃会话数
   current_rpm?: number | null // 当前分钟 RPM 计数
+  copilot_billing_usage?: CopilotBillingUsageSnapshot | null // GitHub Copilot 官方账单快照
 
   // 影子账号关系（spark 维度影子）
   parent_account_id?: number | null
@@ -979,6 +994,17 @@ export interface Account {
   parent_privacy_mode?: string
   parent_subscription_expires_at?: string
   parent_chatgpt_account_id?: string
+}
+
+export interface CopilotBillingUsageSnapshot {
+  username: string
+  period: string
+  items_count: number
+  gross_quantity: number
+  gross_amount: number
+  net_quantity: number
+  net_amount: number
+  fetched_at: string
 }
 
 export interface AccountSchedulerGroupScore {

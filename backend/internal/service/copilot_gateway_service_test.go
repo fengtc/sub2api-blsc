@@ -1,0 +1,747 @@
+package service
+
+import (
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/Wei-Shaw/sub2api/internal/pkg/copilot"
+	"github.com/gin-gonic/gin"
+)
+
+func TestDetectStreamMode(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		want bool
+	}{
+		{"stream true", `{"model":"gpt-4","stream":true}`, true},
+		{"stream false", `{"model":"gpt-4","stream":false}`, false},
+		{"no stream field", `{"model":"gpt-4"}`, false},
+		{"stream string", `{"model":"gpt-4","stream":"true"}`, false},
+		{"stream null", `{"model":"gpt-4","stream":null}`, false},
+		{"invalid json", `{invalid`, false},
+		{"empty body", ``, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := detectStreamMode([]byte(tt.body))
+			if got != tt.want {
+				t.Errorf("detectStreamMode() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCopilotGatewayService_ApplyModelMapping(t *testing.T) {
+	svc := &CopilotGatewayService{}
+
+	t.Run("no mapping configured", func(t *testing.T) {
+		account := &Account{
+			Platform:    PlatformCopilot,
+			Credentials: map[string]any{},
+		}
+		body := []byte(`{"model":"gpt-4o","messages":[]}`)
+
+		newBody, model := svc.applyModelMapping(body, account)
+		if model != "gpt-4o" {
+			t.Errorf("model = %q, want %q", model, "gpt-4o")
+		}
+		// Body should be unchanged
+		var req map[string]json.RawMessage
+		if err := json.Unmarshal(newBody, &req); err != nil {
+			t.Fatalf("failed to unmarshal body: %v", err)
+		}
+		var m string
+		if err := json.Unmarshal(req["model"], &m); err != nil {
+			t.Fatalf("failed to unmarshal model: %v", err)
+		}
+		if m != "gpt-4o" {
+			t.Errorf("body model = %q, want %q", m, "gpt-4o")
+		}
+	})
+
+	t.Run("with mapping", func(t *testing.T) {
+		account := &Account{
+			Platform: PlatformCopilot,
+			Credentials: map[string]any{
+				"model_mapping": map[string]any{
+					"gpt-4": "gpt-4o",
+				},
+			},
+		}
+		body := []byte(`{"model":"gpt-4","messages":[{"role":"user","content":"hi"}]}`)
+
+		newBody, model := svc.applyModelMapping(body, account)
+		if model != "gpt-4" {
+			t.Errorf("model = %q, want %q (original)", model, "gpt-4")
+		}
+		// Body should have mapped model
+		var req map[string]json.RawMessage
+		if err := json.Unmarshal(newBody, &req); err != nil {
+			t.Fatalf("failed to unmarshal body: %v", err)
+		}
+		var m string
+		if err := json.Unmarshal(req["model"], &m); err != nil {
+			t.Fatalf("failed to unmarshal model: %v", err)
+		}
+		if m != "gpt-4o" {
+			t.Errorf("body model = %q, want %q", m, "gpt-4o")
+		}
+	})
+
+	t.Run("empty model", func(t *testing.T) {
+		account := &Account{
+			Platform:    PlatformCopilot,
+			Credentials: map[string]any{},
+		}
+		body := []byte(`{"messages":[]}`)
+
+		_, model := svc.applyModelMapping(body, account)
+		if model != "" {
+			t.Errorf("model = %q, want empty", model)
+		}
+	})
+
+	t.Run("invalid json", func(t *testing.T) {
+		account := &Account{
+			Platform:    PlatformCopilot,
+			Credentials: map[string]any{},
+		}
+		body := []byte(`{invalid}`)
+
+		retBody, model := svc.applyModelMapping(body, account)
+		if model != "" {
+			t.Errorf("model = %q, want empty", model)
+		}
+		if string(retBody) != string(body) {
+			t.Errorf("body should be unchanged for invalid json")
+		}
+	})
+}
+
+func TestCopilotGatewayService_ParseStreamUsage(t *testing.T) {
+	svc := &CopilotGatewayService{}
+
+	t.Run("valid usage", func(t *testing.T) {
+		usage := &CopilotUsage{}
+		data := `{"choices":[],"usage":{"prompt_tokens":10,"completion_tokens":20,"total_tokens":30}}`
+		svc.parseStreamUsage(data, usage)
+
+		if usage.PromptTokens != 10 {
+			t.Errorf("PromptTokens = %d, want 10", usage.PromptTokens)
+		}
+		if usage.CompletionTokens != 20 {
+			t.Errorf("CompletionTokens = %d, want 20", usage.CompletionTokens)
+		}
+		if usage.TotalTokens != 30 {
+			t.Errorf("TotalTokens = %d, want 30", usage.TotalTokens)
+		}
+	})
+
+	t.Run("no usage field", func(t *testing.T) {
+		usage := &CopilotUsage{}
+		data := `{"choices":[{"delta":{"content":"hi"}}]}`
+		svc.parseStreamUsage(data, usage)
+
+		if usage.TotalTokens != 0 {
+			t.Errorf("TotalTokens = %d, want 0", usage.TotalTokens)
+		}
+	})
+
+	t.Run("invalid json", func(t *testing.T) {
+		usage := &CopilotUsage{}
+		svc.parseStreamUsage("{invalid}", usage)
+
+		if usage.TotalTokens != 0 {
+			t.Errorf("TotalTokens = %d, want 0", usage.TotalTokens)
+		}
+	})
+
+	t.Run("updates existing usage", func(t *testing.T) {
+		usage := &CopilotUsage{PromptTokens: 5, CompletionTokens: 5, TotalTokens: 10}
+		data := `{"usage":{"prompt_tokens":15,"completion_tokens":25,"total_tokens":40}}`
+		svc.parseStreamUsage(data, usage)
+
+		if usage.TotalTokens != 40 {
+			t.Errorf("TotalTokens = %d, want 40 (should overwrite)", usage.TotalTokens)
+		}
+	})
+}
+
+func TestCopilotGatewayService_ParseNonStreamUsage(t *testing.T) {
+	svc := &CopilotGatewayService{}
+
+	t.Run("valid usage", func(t *testing.T) {
+		body := []byte(`{"id":"chatcmpl-xxx","choices":[],"usage":{"prompt_tokens":100,"completion_tokens":50,"total_tokens":150}}`)
+		usage := svc.parseNonStreamUsage(body)
+
+		if usage.PromptTokens != 100 {
+			t.Errorf("PromptTokens = %d, want 100", usage.PromptTokens)
+		}
+		if usage.CompletionTokens != 50 {
+			t.Errorf("CompletionTokens = %d, want 50", usage.CompletionTokens)
+		}
+		if usage.TotalTokens != 150 {
+			t.Errorf("TotalTokens = %d, want 150", usage.TotalTokens)
+		}
+	})
+
+	t.Run("no usage", func(t *testing.T) {
+		body := []byte(`{"id":"chatcmpl-xxx","choices":[]}`)
+		usage := svc.parseNonStreamUsage(body)
+
+		if usage.TotalTokens != 0 {
+			t.Errorf("TotalTokens = %d, want 0", usage.TotalTokens)
+		}
+	})
+
+	t.Run("invalid json", func(t *testing.T) {
+		usage := svc.parseNonStreamUsage([]byte(`{invalid}`))
+		if usage.TotalTokens != 0 {
+			t.Errorf("TotalTokens = %d, want 0", usage.TotalTokens)
+		}
+	})
+}
+
+func TestCopilotGatewayService_HandleNonStreamingResponse(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	svc := &CopilotGatewayService{}
+
+	t.Run("success", func(t *testing.T) {
+		respBody := `{"id":"chatcmpl-xxx","choices":[{"message":{"content":"hello"}}],"usage":{"prompt_tokens":5,"completion_tokens":3,"total_tokens":8}}`
+
+		// Create mock upstream response
+		resp := &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"X-Request-Id": {"req-123"}},
+			Body:       copilotStringReadCloser(respBody),
+		}
+
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+
+		result, err := svc.handleNonStreamingResponse(c, resp, "gpt-4o")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if result.StatusCode != http.StatusOK {
+			t.Errorf("StatusCode = %d, want %d", result.StatusCode, http.StatusOK)
+		}
+		if result.Model != "gpt-4o" {
+			t.Errorf("Model = %q, want %q", result.Model, "gpt-4o")
+		}
+		if result.Usage == nil {
+			t.Fatal("Usage should not be nil")
+		}
+		if result.Usage.TotalTokens != 8 {
+			t.Errorf("TotalTokens = %d, want 8", result.Usage.TotalTokens)
+		}
+
+		// Check response was forwarded to client
+		if w.Code != http.StatusOK {
+			t.Errorf("response code = %d, want %d", w.Code, http.StatusOK)
+		}
+		if !strings.Contains(w.Body.String(), "chatcmpl-xxx") {
+			t.Errorf("response body should contain chatcmpl-xxx")
+		}
+	})
+}
+
+func TestCopilotGatewayService_HandleErrorResponse(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	t.Run("401 invalidates token", func(t *testing.T) {
+		provider := NewCopilotTokenProvider(nil)
+		// Pre-populate token cache
+		provider.tokens[42] = nil // just to verify it gets deleted
+
+		svc := &CopilotGatewayService{tokenProvider: provider}
+
+		errBody := `{"error":{"message":"Unauthorized","type":"auth_error"}}`
+		resp := &http.Response{
+			StatusCode: http.StatusUnauthorized,
+			Body:       copilotStringReadCloser(errBody),
+		}
+
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+
+		account := &Account{ID: 42, Platform: PlatformCopilot}
+		result, err := svc.handleErrorResponse(c, resp, account, nil)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if result.StatusCode != http.StatusUnauthorized {
+			t.Errorf("StatusCode = %d, want %d", result.StatusCode, http.StatusUnauthorized)
+		}
+
+		// Verify token was invalidated
+		provider.mu.RLock()
+		_, exists := provider.tokens[42]
+		provider.mu.RUnlock()
+		if exists {
+			t.Error("token should have been invalidated on 401")
+		}
+	})
+
+	t.Run("429 forwards error", func(t *testing.T) {
+		svc := &CopilotGatewayService{tokenProvider: NewCopilotTokenProvider(nil)}
+
+		errBody := `{"error":{"message":"Rate limited"}}`
+		resp := &http.Response{
+			StatusCode: http.StatusTooManyRequests,
+			Body:       copilotStringReadCloser(errBody),
+		}
+
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+
+		account := &Account{ID: 1, Platform: PlatformCopilot}
+		result, err := svc.handleErrorResponse(c, resp, account, nil)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if result.StatusCode != http.StatusTooManyRequests {
+			t.Errorf("StatusCode = %d, want %d", result.StatusCode, http.StatusTooManyRequests)
+		}
+		if w.Code != http.StatusTooManyRequests {
+			t.Errorf("response code = %d, want %d", w.Code, http.StatusTooManyRequests)
+		}
+	})
+}
+
+func TestCopilotRequestDiagnosticsRedactsContent(t *testing.T) {
+	anthropicBody := []byte(`{
+		"model":"claude-opus-4-8",
+		"max_tokens":1024,
+		"stream":true,
+		"system":"private system text",
+		"messages":[
+			{"role":"user","content":[
+				{"type":"text","text":"secret user text"},
+				{"type":"image","source":{"type":"base64","media_type":"image/png","data":"secret-image-data"}}
+			]},
+			{"role":"assistant","content":[
+				{"type":"thinking","thinking":"secret thinking"},
+				{"type":"tool_use","id":"toolu_secret","name":"Read","input":{"file_path":"secret.go"}}
+			]},
+			{"role":"user","content":[
+				{"type":"tool_result","tool_use_id":"toolu_secret","content":"secret tool output"}
+			]}
+		],
+		"tools":[{"name":"Read","description":"secret description","input_schema":{"type":"object"}}],
+		"tool_choice":{"type":"auto"}
+	}`)
+
+	anthropicSummary := summarizeCopilotAnthropicRequest(anthropicBody)
+	rawAnthropicSummary, err := json.Marshal(anthropicSummary)
+	if err != nil {
+		t.Fatalf("marshal anthropic summary: %v", err)
+	}
+	summaryText := string(rawAnthropicSummary)
+	for _, secret := range []string{
+		"secret user text",
+		"secret-image-data",
+		"secret thinking",
+		"toolu_secret",
+		"secret.go",
+		"secret tool output",
+		"secret description",
+	} {
+		if strings.Contains(summaryText, secret) {
+			t.Fatalf("anthropic summary leaked %q: %s", secret, summaryText)
+		}
+	}
+	if anthropicSummary.BlockTypeCounts["tool_use"] != 1 || anthropicSummary.BlockTypeCounts["tool_result"] != 1 {
+		t.Fatalf("unexpected block counts: %#v", anthropicSummary.BlockTypeCounts)
+	}
+	if anthropicSummary.MessageCount != 3 || anthropicSummary.ToolsCount != 1 || anthropicSummary.ToolChoiceType != "auto" {
+		t.Fatalf("unexpected anthropic summary: %#v", anthropicSummary)
+	}
+
+	openAIBody := []byte(`{
+		"model":"claude-opus-4.8",
+		"stream":true,
+		"messages":[
+			{"role":"user","content":[{"type":"text","text":"secret user text"}]},
+			{"role":"assistant","content":"secret assistant text","tool_calls":[{"id":"call_secret","type":"function","function":{"name":"Read","arguments":"{\"file_path\":\"secret.go\"}"}}]},
+			{"role":"tool","tool_call_id":"call_secret","content":"secret tool result"}
+		],
+		"tools":[{"type":"function","function":{"name":"Read","description":"secret description"}}],
+		"tool_choice":"auto",
+		"max_tokens":1024
+	}`)
+
+	openAISummary := summarizeCopilotOpenAIRequest(openAIBody)
+	rawOpenAISummary, err := json.Marshal(openAISummary)
+	if err != nil {
+		t.Fatalf("marshal openai summary: %v", err)
+	}
+	summaryText = string(rawOpenAISummary)
+	for _, secret := range []string{
+		"secret user text",
+		"secret assistant text",
+		"call_secret",
+		"secret.go",
+		"secret tool result",
+		"secret description",
+	} {
+		if strings.Contains(summaryText, secret) {
+			t.Fatalf("openai summary leaked %q: %s", secret, summaryText)
+		}
+	}
+	if openAISummary.MessageCount != 3 || openAISummary.ToolsCount != 1 || !openAISummary.HasMaxTokens {
+		t.Fatalf("unexpected openai summary: %#v", openAISummary)
+	}
+	if openAISummary.MessageShapes[1].ToolCalls != 1 || !openAISummary.MessageShapes[2].HasToolCallID {
+		t.Fatalf("unexpected message shapes: %#v", openAISummary.MessageShapes)
+	}
+}
+
+func TestCopilotGatewayService_HandleStreamingResponse(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	svc := &CopilotGatewayService{}
+
+	t.Run("streams SSE lines", func(t *testing.T) {
+		// Build a mock SSE response
+		sseLines := []string{
+			"data: {\"choices\":[{\"delta\":{\"content\":\"Hello\"}}]}\n",
+			"\n",
+			"data: {\"choices\":[{\"delta\":{\"content\":\" world\"}}],\"usage\":{\"prompt_tokens\":5,\"completion_tokens\":2,\"total_tokens\":7}}\n",
+			"\n",
+			"data: [DONE]\n",
+			"\n",
+		}
+		sseBody := strings.Join(sseLines, "")
+
+		resp := &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       copilotStringReadCloser(sseBody),
+		}
+
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+
+		result, err := svc.handleStreamingResponse(c, resp, "gpt-4o")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if result.StatusCode != http.StatusOK {
+			t.Errorf("StatusCode = %d, want %d", result.StatusCode, http.StatusOK)
+		}
+		if result.Model != "gpt-4o" {
+			t.Errorf("Model = %q, want %q", result.Model, "gpt-4o")
+		}
+		if result.Usage == nil {
+			t.Fatal("Usage should not be nil")
+		}
+		if result.Usage.TotalTokens != 7 {
+			t.Errorf("TotalTokens = %d, want 7", result.Usage.TotalTokens)
+		}
+
+		// Verify SSE content was forwarded
+		body := w.Body.String()
+		if !strings.Contains(body, "Hello") {
+			t.Error("response should contain 'Hello'")
+		}
+		if !strings.Contains(body, "[DONE]") {
+			t.Error("response should contain '[DONE]'")
+		}
+	})
+}
+
+func TestTranslateAnthropicToOpenAI_SanitizesMalformedToolHistory(t *testing.T) {
+	t.Run("valid tool chain remains tool calls", func(t *testing.T) {
+		body := []byte(`{
+			"model":"claude-opus-4-8",
+			"max_tokens":64,
+			"messages":[
+				{"role":"assistant","content":[{"type":"tool_use","id":"toolu_ok","name":"Read","input":{"file_path":"a.go"}}]},
+				{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_ok","content":[{"type":"text","text":"package a"}]},{"type":"text","text":"continue"}]}
+			],
+			"tools":[{"name":"Read","input_schema":{"type":"object"}}]
+		}`)
+
+		out := mustTranslateAnthropicToOpenAI(t, body)
+		if len(out.Messages) != 3 {
+			t.Fatalf("messages len = %d, want 3: %#v", len(out.Messages), out.Messages)
+		}
+		if len(out.Messages[0].ToolCalls) != 1 {
+			t.Fatalf("tool_calls len = %d, want 1", len(out.Messages[0].ToolCalls))
+		}
+		if out.Messages[1].Role != "tool" || out.Messages[1].ToolCallID != "toolu_ok" {
+			t.Fatalf("message[1] = %#v, want tool result", out.Messages[1])
+		}
+		if out.Messages[1].Content != "package a" {
+			t.Fatalf("tool content = %#v, want package a", out.Messages[1].Content)
+		}
+	})
+
+	t.Run("missing tool result downgrades only orphaned tool use", func(t *testing.T) {
+		body := []byte(`{
+			"model":"claude-opus-4-8",
+			"max_tokens":64,
+			"messages":[
+				{"role":"assistant","content":[
+					{"type":"tool_use","id":"toolu_keep","name":"Read","input":{"file_path":"a.go"}},
+					{"type":"tool_use","id":"toolu_missing","name":"Bash","input":{"command":"ls"}}
+				]},
+				{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_keep","content":"package a"}]}
+			],
+			"tools":[{"name":"Read","input_schema":{"type":"object"}},{"name":"Bash","input_schema":{"type":"object"}}]
+		}`)
+
+		out := mustTranslateAnthropicToOpenAI(t, body)
+		if len(out.Messages) != 2 {
+			t.Fatalf("messages len = %d, want 2: %#v", len(out.Messages), out.Messages)
+		}
+		if len(out.Messages[0].ToolCalls) != 1 || out.Messages[0].ToolCalls[0].ID != "toolu_keep" {
+			t.Fatalf("tool_calls = %#v, want only toolu_keep", out.Messages[0].ToolCalls)
+		}
+		content, ok := out.Messages[0].Content.(string)
+		if !ok || !strings.Contains(content, "toolu_missing") {
+			t.Fatalf("assistant content = %#v, want downgraded missing tool text", out.Messages[0].Content)
+		}
+		if out.Messages[1].Role != "tool" || out.Messages[1].ToolCallID != "toolu_keep" {
+			t.Fatalf("message[1] = %#v, want kept tool result", out.Messages[1])
+		}
+	})
+
+	t.Run("orphan tool result becomes user text", func(t *testing.T) {
+		body := []byte(`{
+			"model":"claude-opus-4-8",
+			"max_tokens":64,
+			"messages":[
+				{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_orphan","content":"stale result"},{"type":"text","text":"next task"}]}
+			]
+		}`)
+
+		out := mustTranslateAnthropicToOpenAI(t, body)
+		if len(out.Messages) != 1 {
+			t.Fatalf("messages len = %d, want 1: %#v", len(out.Messages), out.Messages)
+		}
+		if out.Messages[0].Role == "tool" {
+			t.Fatalf("orphan tool_result should not become OpenAI tool message: %#v", out.Messages[0])
+		}
+		content, ok := out.Messages[0].Content.([]any)
+		if !ok {
+			t.Fatalf("content = %#v, want multi-part user content", out.Messages[0].Content)
+		}
+		raw, _ := json.Marshal(content)
+		if !strings.Contains(string(raw), "toolu_orphan") || !strings.Contains(string(raw), "next task") {
+			t.Fatalf("content = %s, want downgraded tool result and original text", string(raw))
+		}
+	})
+}
+
+func TestTranslateAnthropicToOpenAI_ClampsCopilotMaxTokens(t *testing.T) {
+	body := []byte(`{
+		"model":"claude-opus-4-8",
+		"max_tokens":64000,
+		"messages":[{"role":"user","content":"hello"}],
+		"stream":true
+	}`)
+
+	out := mustTranslateAnthropicToOpenAI(t, body)
+	if out.MaxTokens != copilotMaxOutputTokens {
+		t.Fatalf("max_tokens = %d, want %d", out.MaxTokens, copilotMaxOutputTokens)
+	}
+}
+
+func TestCopilotGatewayService_ForwardMessagesDoesNotDoubleApplyWildcardMapping(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	var upstreamModel string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/chat/completions" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		var req struct {
+			Model string `json:"model"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode upstream request: %v", err)
+		}
+		upstreamModel = req.Model
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"id":"chatcmpl-test","model":"claude-opus-4.8","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`)
+	}))
+	defer server.Close()
+
+	provider := NewCopilotTokenProvider(nil)
+	tok := newCopilotTestToken("copilot-token-123")
+	provider.mu.Lock()
+	provider.tokens[28] = &tok
+	provider.mu.Unlock()
+
+	svc := NewCopilotGatewayService(provider)
+	account := &Account{
+		ID:       28,
+		Platform: PlatformCopilot,
+		Type:     AccountTypeAPIKey,
+		Credentials: map[string]any{
+			"github_token": "ghp_test",
+			"base_url":     server.URL,
+			"model_mapping": map[string]any{
+				"claude-opus-4-8": "claude-opus-4.8",
+				"*":               "claude-haiku-4.5",
+			},
+		},
+	}
+
+	body := []byte(`{
+		"model":"claude-opus-4-8",
+		"max_tokens":64000,
+		"messages":[{"role":"user","content":"hello"}],
+		"stream":false
+	}`)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+
+	result, err := svc.ForwardMessages(t.Context(), c, account, body)
+	if err != nil {
+		t.Fatalf("ForwardMessages error: %v", err)
+	}
+	if result.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want %d", result.StatusCode, http.StatusOK)
+	}
+	if upstreamModel != "claude-opus-4.8" {
+		t.Fatalf("upstream model = %q, want claude-opus-4.8", upstreamModel)
+	}
+	if strings.Contains(upstreamModel, "haiku") {
+		t.Fatalf("upstream model was remapped by wildcard: %q", upstreamModel)
+	}
+}
+
+func TestCopilotGatewayService_ListModels(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	t.Run("success", func(t *testing.T) {
+		modelsResp := `{"data":[{"id":"gpt-4o"},{"id":"gpt-4o-mini"}]}`
+
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/models" {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			auth := r.Header.Get("Authorization")
+			if auth != "Bearer copilot-token-123" {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprint(w, modelsResp)
+		}))
+		defer server.Close()
+
+		provider := NewCopilotTokenProvider(nil)
+		svc := NewCopilotGatewayService(provider)
+
+		// Pre-populate token so no exchange is needed
+		tok := newCopilotTestToken("copilot-token-123")
+		provider.mu.Lock()
+		provider.tokens[1] = &tok
+		provider.mu.Unlock()
+
+		account := &Account{
+			ID:       1,
+			Platform: PlatformCopilot,
+			Type:     AccountTypeAPIKey,
+			Credentials: map[string]any{
+				"github_token": "ghp_test",
+				"base_url":     server.URL,
+			},
+		}
+
+		body, err := svc.ListModels(t.Context(), account)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if !strings.Contains(string(body), "gpt-4o") {
+			t.Errorf("response should contain model list, got: %s", string(body))
+		}
+	})
+
+	t.Run("upstream error", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusInternalServerError)
+			fmt.Fprint(w, `{"error":"internal"}`)
+		}))
+		defer server.Close()
+
+		provider := NewCopilotTokenProvider(nil)
+		svc := NewCopilotGatewayService(provider)
+
+		tok := newCopilotTestToken("tok")
+		provider.mu.Lock()
+		provider.tokens[2] = &tok
+		provider.mu.Unlock()
+
+		account := &Account{
+			ID:       2,
+			Platform: PlatformCopilot,
+			Type:     AccountTypeAPIKey,
+			Credentials: map[string]any{
+				"github_token": "ghp_test",
+				"base_url":     server.URL,
+			},
+		}
+
+		_, err := svc.ListModels(t.Context(), account)
+		if err == nil {
+			t.Fatal("expected error for 500 response")
+		}
+		if !strings.Contains(err.Error(), "500") {
+			t.Errorf("error should mention status code, got: %v", err)
+		}
+	})
+}
+
+// ── helpers ──────────────────────────────────────────────────────────
+
+func mustTranslateAnthropicToOpenAI(t *testing.T, body []byte) openAIChatRequest {
+	t.Helper()
+	translated, err := translateAnthropicToOpenAI(body, nil)
+	if err != nil {
+		t.Fatalf("translateAnthropicToOpenAI error: %v", err)
+	}
+	var req openAIChatRequest
+	if err := json.Unmarshal(translated, &req); err != nil {
+		t.Fatalf("unmarshal translated body: %v\n%s", err, string(translated))
+	}
+	return req
+}
+
+// copilotStringReadCloser wraps a string as io.ReadCloser for http.Response.Body.
+func copilotStringReadCloser(s string) *copilotTestReadCloser {
+	return &copilotTestReadCloser{Reader: strings.NewReader(s)}
+}
+
+type copilotTestReadCloser struct {
+	Reader *strings.Reader
+}
+
+func (rc *copilotTestReadCloser) Read(p []byte) (int, error) { return rc.Reader.Read(p) }
+func (rc *copilotTestReadCloser) Close() error               { return nil }
+
+// newCopilotTestToken returns a copilot.CopilotToken that won't expire during tests.
+func newCopilotTestToken(token string) copilot.CopilotToken {
+	return copilot.CopilotToken{
+		Token:     token,
+		ExpiresAt: time.Now().Add(10 * time.Minute),
+		RefreshAt: time.Now().Add(5 * time.Minute),
+	}
+}

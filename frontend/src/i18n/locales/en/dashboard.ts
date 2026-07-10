@@ -232,6 +232,28 @@ export default {
     },
   },
 
+  modelPlaza: {
+    title: 'Model Plaza',
+    description: 'Exact model names available for requests',
+    searchPlaceholder: 'Search model, provider, or upstream name...',
+    allProviders: 'All Providers',
+    modelCount: '{count} models',
+    copyModel: 'Copy model name',
+    copied: 'Model name copied',
+    empty: 'No matching models',
+    columns: {
+      model: 'Exact Model Name',
+      provider: 'Provider',
+      endpoint: 'Endpoint',
+      upstream: 'Upstream Model',
+    },
+  },
+
+  userGuide: {
+    title: 'User Guide',
+    description: 'OIDC login, API key creation, and connectivity checks',
+  },
+
   // Usage
   usage: {
     title: 'Usage Records',
@@ -248,6 +270,7 @@ export default {
     cacheBreakdown: 'Cache Token Breakdown',
     cacheCreationTokensLabel: 'Cache Creation',
     cacheReadTokensLabel: 'Cache Read',
+    cacheReadRate: 'Cache read rate',
     totalCost: 'Total Cost',
     standardCost: 'Standard',
     actualCost: 'Actual',

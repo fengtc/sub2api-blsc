@@ -150,6 +150,8 @@ export default {
     dashboard: 'Dashboard',
     announcements: 'Announcements',
     apiKeys: 'API Keys',
+    modelPlaza: 'Model Plaza',
+    userGuide: 'User Guide',
     batchImage: 'Batch Images',
     usage: 'Usage',
     redeem: 'Redeem',

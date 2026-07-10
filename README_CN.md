@@ -556,7 +556,7 @@ gateway:
   sora_media_signed_url_ttl_seconds: 900
 ```
 
-> 若未配置签名密钥，`/sora/media-signed` 将返回 503。  
+> 若未配置签名密钥，`/sora/media-signed` 将返回 503。
 > 如需更严格的访问控制，可将 `sora_media_require_api_key` 设为 true，仅允许携带 API Key 的 `/sora/media` 访问。
 
 访问策略说明：
@@ -728,7 +728,6 @@ export ANTHROPIC_AUTH_TOKEN="sk-xxx"
 Antigravity 账户支持可选的**混合调度**功能。开启后，通用端点 `/v1/messages` 和 `/v1beta/` 也会调度该账户。
 
 > **⚠️ 注意**：Anthropic Claude 和 Antigravity Claude **不能在同一上下文中混合使用**，请通过分组功能做好隔离。
-
 ---
 
 ## 项目结构

@@ -187,6 +187,7 @@ import ProfileAvatarCard from '@/components/user/profile/ProfileAvatarCard.vue'
 import ProfileEditForm from '@/components/user/profile/ProfileEditForm.vue'
 import ProfileIdentityBindingsSection from '@/components/user/profile/ProfileIdentityBindingsSection.vue'
 import type { User, UserAuthBindingStatus, UserAuthProvider, UserProfileSourceContext } from '@/types'
+import { formatUsdWithCny } from '@/utils/format'
 
 const props = withDefaults(defineProps<{
   user: User | null
@@ -272,9 +273,7 @@ const providerLabels = computed<Record<UserAuthProvider, string>>(() => ({
   google: 'Google'
 }))
 
-function formatCurrency(value: number): string {
-  return `$${value.toFixed(2)}`
-}
+const formatCurrency = (value: number): string => formatUsdWithCny(value, 2)
 
 function normalizeProvider(value: string): UserAuthProvider | null {
   const normalized = value.trim().toLowerCase()

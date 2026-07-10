@@ -178,6 +178,17 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 			return
 		}
 		account := selection.Account
+		if skip, used, limit := shouldSkipCopilotAccountForBilling(c.Request.Context(), account); skip {
+			if selection.Acquired && selection.ReleaseFunc != nil {
+				selection.ReleaseFunc()
+			}
+			reqLog.Info("openai_chat_completions.copilot_account_billing_credit_limited",
+				zap.Int64("account_id", account.ID),
+				zap.Float64("used_credits", used),
+				zap.Float64("credit_limit", limit))
+			failedAccountIDs[account.ID] = struct{}{}
+			continue
+		}
 		sessionHash = ensureOpenAIPoolModeSessionHash(sessionHash, account)
 		reqLog.Debug("openai_chat_completions.account_selected", zap.Int64("account_id", account.ID), zap.String("account_name", account.Name))
 		_ = scheduleDecision
@@ -196,12 +207,23 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 			forwardBody = h.gatewayService.ReplaceModelInBody(body, channelMapping.MappedModel)
 		}
 		writerSizeBeforeForward := c.Writer.Size()
+		copilotStatusCode := http.StatusOK
 		result, err := func() (*service.OpenAIForwardResult, error) {
 			defer func() {
 				if accountReleaseFunc != nil {
 					accountReleaseFunc()
 				}
 			}()
+			if account.Platform == service.PlatformCopilot {
+				if h.copilotGatewayService == nil {
+					return nil, errors.New("copilot gateway service is not configured")
+				}
+				copilotResult, copilotErr := h.copilotGatewayService.ForwardChatCompletions(c.Request.Context(), c, account, forwardBody)
+				if copilotResult != nil {
+					copilotStatusCode = copilotResult.StatusCode
+				}
+				return copilotChatForwardResult(copilotResult, reqStream, time.Since(forwardStart)), copilotErr
+			}
 			return h.gatewayService.ForwardAsChatCompletions(c.Request.Context(), c, account, forwardBody, promptCacheKey, "")
 		}()
 		cyberBlockKeyChat := ""
@@ -219,6 +241,9 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 		service.SetOpsLatencyMs(c, service.OpsResponseLatencyMsKey, responseLatencyMs)
 		if err == nil && result != nil && result.FirstTokenMs != nil {
 			service.SetOpsLatencyMs(c, service.OpsTimeToFirstTokenMsKey, int64(*result.FirstTokenMs))
+		}
+		if err == nil && account.Platform == service.PlatformCopilot && copilotStatusCode != http.StatusOK {
+			return
 		}
 		if err != nil {
 			if result != nil && result.ImageCount > 0 {

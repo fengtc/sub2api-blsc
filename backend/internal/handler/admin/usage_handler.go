@@ -2,6 +2,7 @@ package admin
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -55,6 +56,29 @@ type CreateUsageCleanupTaskRequest struct {
 	Stream      *bool   `json:"stream"`
 	BillingType *int8   `json:"billing_type"`
 	Timezone    string  `json:"timezone"`
+}
+
+type ExternalUsageLogsResponse struct {
+	Items      []ExternalUsageLogItem            `json:"items"`
+	Totals     *service.ExternalUsageLogTotals   `json:"totals"`
+	Pagination ExternalUsageLogsPaginationResult `json:"pagination"`
+}
+
+type ExternalUsageLogItem struct {
+	CreatedAt     time.Time `json:"created_at"`
+	Email         string    `json:"email"`
+	Username      string    `json:"username"`
+	UpstreamModel string    `json:"upstream_model"`
+	TotalTokens   int       `json:"total_tokens"`
+	ActualCost    float64   `json:"actual_cost"`
+	Remark        string    `json:"remark"`
+}
+
+type ExternalUsageLogsPaginationResult struct {
+	Total    int64 `json:"total"`
+	Page     int   `json:"page"`
+	PageSize int   `json:"page_size"`
+	Pages    int   `json:"pages"`
 }
 
 // List handles listing all usage records with filters
@@ -197,6 +221,154 @@ func (h *UsageHandler) List(c *gin.Context) {
 		out = append(out, *dto.UsageLogFromServiceAdmin(&records[i]))
 	}
 	response.Paginated(c, out, result.Total, page, pageSize)
+}
+
+// ExternalLogs handles listing denormalized usage records for external systems.
+// GET /api/v1/admin/usage/external-logs?start_time=2026-06-01T00:00:00Z&end_time=2026-06-02T00:00:00Z
+func (h *UsageHandler) ExternalLogs(c *gin.Context) {
+	if h.usageService == nil {
+		response.InternalError(c, "usage service is not available")
+		return
+	}
+
+	page, pageSize := response.ParsePagination(c)
+	if pageSize > 500 {
+		pageSize = 500
+	}
+
+	startTime, err := parseExternalUsageTime(c.Query("start_time"), c.Query("start_date"), c.Query("timezone"), false)
+	if err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+	endTime, err := parseExternalUsageTime(c.Query("end_time"), c.Query("end_date"), c.Query("timezone"), true)
+	if err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+	if startTime == nil || endTime == nil {
+		response.BadRequest(c, "start_time and end_time are required")
+		return
+	}
+	if !startTime.Before(*endTime) {
+		response.BadRequest(c, "start_time must be before end_time")
+		return
+	}
+	if endTime.Sub(*startTime) > 366*24*time.Hour {
+		response.BadRequest(c, "time range must be 366 days or less")
+		return
+	}
+
+	filters := service.ExternalUsageLogFilters{
+		StartTime: startTime,
+		EndTime:   endTime,
+		Model:     strings.TrimSpace(c.Query("model")),
+	}
+
+	if v, ok := parseOptionalPositiveInt64Query(c, "user_id"); !ok {
+		return
+	} else {
+		filters.UserID = v
+	}
+	if v, ok := parseOptionalPositiveInt64Query(c, "api_key_id"); !ok {
+		return
+	} else {
+		filters.APIKeyID = v
+	}
+	if v, ok := parseOptionalPositiveInt64Query(c, "account_id"); !ok {
+		return
+	} else {
+		filters.AccountID = v
+	}
+	if v, ok := parseOptionalPositiveInt64Query(c, "group_id"); !ok {
+		return
+	} else {
+		filters.GroupID = v
+	}
+
+	params := pagination.PaginationParams{
+		Page:      page,
+		PageSize:  pageSize,
+		SortBy:    "created_at",
+		SortOrder: c.DefaultQuery("sort_order", "desc"),
+	}
+	items, pageResult, totals, err := h.usageService.ListExternalUsageLogs(c.Request.Context(), params, filters)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, ExternalUsageLogsResponse{
+		Items:  toExternalUsageLogItems(items),
+		Totals: totals,
+		Pagination: ExternalUsageLogsPaginationResult{
+			Total:    pageResult.Total,
+			Page:     pageResult.Page,
+			PageSize: pageResult.PageSize,
+			Pages:    pageResult.Pages,
+		},
+	})
+}
+
+func toExternalUsageLogItems(logs []service.ExternalUsageLog) []ExternalUsageLogItem {
+	items := make([]ExternalUsageLogItem, 0, len(logs))
+	for _, log := range logs {
+		upstreamModel := log.Model
+		if log.RequestedModel != "" {
+			upstreamModel = log.RequestedModel
+		}
+		if log.UpstreamModel != nil && strings.TrimSpace(*log.UpstreamModel) != "" {
+			upstreamModel = *log.UpstreamModel
+		}
+		items = append(items, ExternalUsageLogItem{
+			CreatedAt:     log.CreatedAt,
+			Email:         log.Email,
+			Username:      log.Username,
+			UpstreamModel: upstreamModel,
+			TotalTokens:   log.TotalTokens,
+			ActualCost:    log.ActualCost,
+			Remark:        log.Remark,
+		})
+	}
+	return items
+}
+
+func parseExternalUsageTime(rawTime, rawDate, userTZ string, endOfDate bool) (*time.Time, error) {
+	rawTime = strings.TrimSpace(rawTime)
+	if rawTime != "" {
+		if t, err := time.Parse(time.RFC3339, rawTime); err == nil {
+			return &t, nil
+		}
+		if t, err := time.Parse("2006-01-02 15:04:05", rawTime); err == nil {
+			return &t, nil
+		}
+		return nil, fmt.Errorf("invalid time format, use RFC3339 or YYYY-MM-DD HH:MM:SS")
+	}
+
+	rawDate = strings.TrimSpace(rawDate)
+	if rawDate == "" {
+		return nil, nil
+	}
+	t, err := timezone.ParseInUserLocation("2006-01-02", rawDate, userTZ)
+	if err != nil {
+		return nil, err
+	}
+	if endOfDate {
+		t = t.AddDate(0, 0, 1)
+	}
+	return &t, nil
+}
+
+func parseOptionalPositiveInt64Query(c *gin.Context, name string) (int64, bool) {
+	raw := strings.TrimSpace(c.Query(name))
+	if raw == "" {
+		return 0, true
+	}
+	v, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || v <= 0 {
+		response.BadRequest(c, "Invalid "+name)
+		return 0, false
+	}
+	return v, true
 }
 
 // Stats handles getting usage statistics with filters
