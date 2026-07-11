@@ -145,7 +145,9 @@ func fetchCopilotBillingGuardUsedCredits(ctx context.Context, username, token st
 	if err != nil {
 		return 0, err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return 0, fmt.Errorf("github billing usage returned status %d", resp.StatusCode)
 	}

@@ -171,12 +171,12 @@ func TestAccountIsModelSupported(t *testing.T) {
 			expected:       true,
 		},
 		{
-			name:           "anthropic oauth empty mapping rejects non claude model",
+			name:           "anthropic oauth empty mapping preserves non openai platform behavior",
 			platform:       PlatformAnthropic,
 			accountType:    AccountTypeOAuth,
 			credentials:    map[string]any{},
 			requestedModel: "GLM-4.5-Air",
-			expected:       false,
+			expected:       true,
 		},
 		{
 			name:           "anthropic apikey empty mapping still allows all",

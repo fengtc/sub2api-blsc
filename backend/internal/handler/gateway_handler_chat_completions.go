@@ -242,7 +242,8 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 		}
 		var result *service.ForwardResult
 		copilotStatusCode := http.StatusOK
-		if account.Platform == service.PlatformGemini {
+		switch account.Platform {
+		case service.PlatformGemini:
 			if h.geminiCompatService == nil {
 				h.chatCompletionsErrorResponse(c, http.StatusBadGateway, "upstream_error", "Gemini compatibility service is not configured")
 				if accountReleaseFunc != nil {
@@ -251,7 +252,7 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 				return
 			}
 			result, err = h.geminiCompatService.ForwardAsChatCompletions(c.Request.Context(), c, account, forwardBody)
-		} else if account.Platform == service.PlatformCopilot {
+		case service.PlatformCopilot:
 			if h.copilotGatewayService == nil {
 				err = errors.New("copilot gateway service is not configured")
 			} else {
@@ -262,7 +263,7 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 					result = copilotMessagesForwardResult(copilotResult, reqStream, time.Since(requestStart))
 				}
 			}
-		} else {
+		default:
 			result, err = h.gatewayService.ForwardAsChatCompletions(c.Request.Context(), c, account, forwardBody, parsedReq)
 		}
 

@@ -1367,7 +1367,9 @@ func (s *defaultOpenAIAccountScheduler) isAccountRequestCompatible(ctx context.C
 		return false
 	}
 	nativePlatform := normalizeOpenAICompatiblePlatform(req.Platform)
-	if account.Platform != nativePlatform && !(nativePlatform == PlatformOpenAI && account.Platform == PlatformCopilot) {
+	isNativePlatform := account.Platform == nativePlatform
+	isCopilotOpenAICompatible := nativePlatform == PlatformOpenAI && account.Platform == PlatformCopilot
+	if !isNativePlatform && !isCopilotOpenAICompatible {
 		return false
 	}
 	if s != nil && s.service != nil && s.service.isOpenAIAccountRuntimeBlocked(account) {
