@@ -814,6 +814,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					err = errors.New("copilot gateway service is not configured")
 				} else {
 					copilotResult, copilotErr := h.copilotGatewayService.ForwardMessages(requestCtx, c, account, attemptBody)
+					syncCopilotBillingGuardFromFailover(account, copilotErr)
 					err = copilotErr
 					if copilotResult != nil {
 						copilotStatusCode = copilotResult.StatusCode

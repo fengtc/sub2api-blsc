@@ -1,7 +1,9 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -710,7 +712,216 @@ func TestCopilotGatewayService_ListModels(t *testing.T) {
 	})
 }
 
+func TestNextCopilotMonthlyQuotaReset_CrossYearUTC(t *testing.T) {
+	now := time.Date(2026, time.December, 31, 23, 59, 59, 0, time.FixedZone("UTC-7", -7*60*60))
+	want := time.Date(2027, time.February, 1, 0, 0, 0, 0, time.UTC)
+
+	got := nextCopilotMonthlyQuotaReset(now)
+	if !got.Equal(want) {
+		t.Fatalf("next reset = %s, want %s", got, want)
+	}
+	if got.Location() != time.UTC {
+		t.Fatalf("next reset location = %s, want UTC", got.Location())
+	}
+}
+
+func TestIsCopilotQuotaExceededResponseRequires402AndStructuredCode(t *testing.T) {
+	tests := []struct {
+		name       string
+		statusCode int
+		body       string
+		want       bool
+	}{
+		{name: "exact quota response", statusCode: http.StatusPaymentRequired, body: `{"error":{"code":"quota_exceeded"}}`, want: true},
+		{name: "same code on another status", statusCode: http.StatusTooManyRequests, body: `{"error":{"code":"quota_exceeded"}}`, want: false},
+		{name: "different 402 code", statusCode: http.StatusPaymentRequired, body: `{"error":{"code":"billing_required"}}`, want: false},
+		{name: "quota text without structured code", statusCode: http.StatusPaymentRequired, body: `{"error":{"message":"quota_exceeded"}}`, want: false},
+		{name: "malformed JSON", statusCode: http.StatusPaymentRequired, body: `{"error":`, want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isCopilotQuotaExceededResponse(tt.statusCode, []byte(tt.body)); got != tt.want {
+				t.Fatalf("isCopilotQuotaExceededResponse(%d, %q) = %v, want %v", tt.statusCode, tt.body, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCopilotGatewayService_HandleErrorResponseQuotaExceeded(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	repo := &copilotTempUnschedulableRepoStub{}
+	provider := NewCopilotTokenProvider(repo)
+	svc := NewCopilotGatewayService(provider)
+	account := &Account{ID: 42, Platform: PlatformCopilot, Type: AccountTypeAPIKey}
+	body := `{"error":{"message":"You have exceeded your monthly quota","code":"quota_exceeded"}}`
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	requestCtx, cancel := context.WithCancel(context.Background())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil).WithContext(requestCtx)
+	cancel()
+
+	resp := &http.Response{
+		StatusCode: http.StatusPaymentRequired,
+		Header: http.Header{
+			"Retry-After": []string{"120"},
+			"X-Upstream":  []string{"copilot"},
+		},
+		Body: copilotStringReadCloser(body),
+	}
+	startedAt := time.Now()
+	result, err := svc.handleErrorResponse(c, resp, account, nil)
+	finishedAt := time.Now()
+
+	if result != nil {
+		t.Fatalf("result = %#v, want nil on failover", result)
+	}
+	var failoverErr *UpstreamFailoverError
+	if !errors.As(err, &failoverErr) {
+		t.Fatalf("error = %T %v, want *UpstreamFailoverError", err, err)
+	}
+	if failoverErr.StatusCode != http.StatusPaymentRequired {
+		t.Fatalf("status = %d, want 402", failoverErr.StatusCode)
+	}
+	if string(failoverErr.ResponseBody) != body {
+		t.Fatalf("response body = %q, want %q", failoverErr.ResponseBody, body)
+	}
+	if failoverErr.ResponseHeaders.Get("Retry-After") != "120" || failoverErr.ResponseHeaders.Get("X-Upstream") != "copilot" {
+		t.Fatalf("response headers = %#v, want cloned upstream headers", failoverErr.ResponseHeaders)
+	}
+	resp.Header.Set("X-Upstream", "mutated")
+	if failoverErr.ResponseHeaders.Get("X-Upstream") != "copilot" {
+		t.Fatal("failover response headers share storage with upstream response")
+	}
+	if failoverErr.TempUnschedulableUntil == nil {
+		t.Fatal("TempUnschedulableUntil is nil")
+	}
+	if failoverErr.TempUnschedulableReason != copilotMonthlyQuotaExceededReason {
+		t.Fatalf("reason = %q, want %q", failoverErr.TempUnschedulableReason, copilotMonthlyQuotaExceededReason)
+	}
+	if failoverErr.RetryableOnSameAccount {
+		t.Fatal("quota exhaustion must not retry on the same account")
+	}
+	if c.Writer.Written() || w.Body.Len() != 0 {
+		t.Fatalf("quota response was written before failover: status=%d body=%q", w.Code, w.Body.String())
+	}
+
+	if repo.calls != 1 {
+		t.Fatalf("SetTempUnschedulable calls = %d, want 1", repo.calls)
+	}
+	if repo.accountID != account.ID {
+		t.Fatalf("persisted account ID = %d, want %d", repo.accountID, account.ID)
+	}
+	if repo.reason != copilotMonthlyQuotaExceededReason {
+		t.Fatalf("persisted reason = %q, want %q", repo.reason, copilotMonthlyQuotaExceededReason)
+	}
+	if !repo.until.Equal(*failoverErr.TempUnschedulableUntil) {
+		t.Fatalf("persisted until = %s, metadata until = %s", repo.until, failoverErr.TempUnschedulableUntil)
+	}
+	wantAtStart := nextCopilotMonthlyQuotaReset(startedAt)
+	wantAtFinish := nextCopilotMonthlyQuotaReset(finishedAt)
+	if !repo.until.Equal(wantAtStart) && !repo.until.Equal(wantAtFinish) {
+		t.Fatalf("persisted until = %s, want next UTC month boundary (%s or %s)", repo.until, wantAtStart, wantAtFinish)
+	}
+	if repo.contextErr != nil {
+		t.Fatalf("persistence context inherited request cancellation: %v", repo.contextErr)
+	}
+	if !repo.contextHadDeadline {
+		t.Fatal("persistence context has no timeout deadline")
+	}
+}
+
+func TestCopilotGatewayService_HandleErrorResponseQuotaPersistenceFailureStillFailsOver(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	repo := &copilotTempUnschedulableRepoStub{err: errors.New("database unavailable")}
+	provider := NewCopilotTokenProvider(repo)
+	svc := NewCopilotGatewayService(provider)
+	account := &Account{ID: 43, Platform: PlatformCopilot, Type: AccountTypeAPIKey}
+	body := `{"error":{"code":"quota_exceeded"}}`
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	resp := &http.Response{
+		StatusCode: http.StatusPaymentRequired,
+		Header:     make(http.Header),
+		Body:       copilotStringReadCloser(body),
+	}
+
+	result, err := svc.handleErrorResponse(c, resp, account, nil)
+	if result != nil {
+		t.Fatalf("result = %#v, want nil on failover", result)
+	}
+	var failoverErr *UpstreamFailoverError
+	if !errors.As(err, &failoverErr) {
+		t.Fatalf("error = %T %v, want *UpstreamFailoverError", err, err)
+	}
+	if failoverErr.TempUnschedulableUntil == nil || failoverErr.TempUnschedulableReason != copilotMonthlyQuotaExceededReason {
+		t.Fatalf("missing temp-unschedulable metadata: %#v", failoverErr)
+	}
+	if repo.calls != 1 {
+		t.Fatalf("SetTempUnschedulable calls = %d, want 1", repo.calls)
+	}
+	if c.Writer.Written() || w.Body.Len() != 0 {
+		t.Fatalf("quota response was written despite failover: status=%d body=%q", w.Code, w.Body.String())
+	}
+}
+
+func TestCopilotGatewayService_HandleErrorResponseNonQuota402PreservesPassthrough(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	repo := &copilotTempUnschedulableRepoStub{}
+	provider := NewCopilotTokenProvider(repo)
+	svc := NewCopilotGatewayService(provider)
+	account := &Account{ID: 44, Platform: PlatformCopilot, Type: AccountTypeAPIKey}
+	body := `{"error":{"message":"payment method required","code":"billing_required"}}`
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	resp := &http.Response{
+		StatusCode: http.StatusPaymentRequired,
+		Header:     make(http.Header),
+		Body:       copilotStringReadCloser(body),
+	}
+
+	result, err := svc.handleErrorResponse(c, resp, account, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result == nil || result.StatusCode != http.StatusPaymentRequired {
+		t.Fatalf("result = %#v, want passthrough status 402", result)
+	}
+	if repo.calls != 0 {
+		t.Fatalf("SetTempUnschedulable calls = %d, want 0", repo.calls)
+	}
+	if w.Code != http.StatusPaymentRequired || w.Body.String() != body {
+		t.Fatalf("passthrough response = status %d body %q, want 402 body %q", w.Code, w.Body.String(), body)
+	}
+}
+
 // ── helpers ──────────────────────────────────────────────────────────
+
+type copilotTempUnschedulableRepoStub struct {
+	AccountRepository
+	calls              int
+	accountID          int64
+	until              time.Time
+	reason             string
+	contextErr         error
+	contextHadDeadline bool
+	err                error
+}
+
+func (r *copilotTempUnschedulableRepoStub) SetTempUnschedulable(ctx context.Context, id int64, until time.Time, reason string) error {
+	r.calls++
+	r.accountID = id
+	r.until = until
+	r.reason = reason
+	r.contextErr = ctx.Err()
+	_, r.contextHadDeadline = ctx.Deadline()
+	return r.err
+}
 
 func mustTranslateAnthropicToOpenAI(t *testing.T, body []byte) openAIChatRequest {
 	t.Helper()

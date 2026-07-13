@@ -219,6 +219,7 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 					return nil, errors.New("copilot gateway service is not configured")
 				}
 				copilotResult, copilotErr := h.copilotGatewayService.ForwardChatCompletions(c.Request.Context(), c, account, forwardBody)
+				syncCopilotBillingGuardFromFailover(account, copilotErr)
 				if copilotResult != nil {
 					copilotStatusCode = copilotResult.StatusCode
 				}

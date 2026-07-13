@@ -1181,17 +1181,32 @@
                 class="input"
                 placeholder="20000"
               />
-              <p class="input-hint">达到该额度后自动跳过此账号调度。</p>
+              <p class="input-hint">Copilot 每月 AI Credits 总额度。</p>
             </div>
-            <label class="flex items-start gap-3 rounded-lg border border-gray-200 p-3 dark:border-dark-600">
+            <div>
+              <label class="input-label">安全余量（AI Credits）</label>
+              <input
+                v-model.number="copilotBillingSafetyMargin"
+                type="number"
+                min="0"
+                step="1"
+                class="input"
+                placeholder="200"
+              />
+              <p class="input-hint">默认 200，允许设为 0。</p>
+            </div>
+            <p class="input-hint sm:col-span-2">Billing API 预防停调度阈值 = 月额度 - 安全余量。</p>
+            <label class="flex items-start gap-3 rounded-lg border border-gray-200 p-3 dark:border-dark-600 sm:col-span-2">
               <input
                 v-model="copilotBillingAutoPauseDisabled"
                 type="checkbox"
                 class="mt-1 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
               />
               <span>
-                <span class="block text-sm font-medium text-gray-700 dark:text-gray-300">关闭额度用完自动停止调度</span>
-                <span class="mt-1 block text-xs text-gray-500 dark:text-gray-400">仅展示官方用量，不参与调度保护。</span>
+                <span class="block text-sm font-medium text-gray-700 dark:text-gray-300">关闭 Billing API 预防停调度</span>
+                <span class="mt-1 block text-xs text-gray-500 dark:text-gray-400">
+                  仅关闭 Billing API 预防停调度；上游 402 quota_exceeded 仍会作为权威信号停止调度。
+                </span>
               </span>
             </label>
           </div>
@@ -3666,6 +3681,7 @@ const copilotBillingValidating = ref(false)
 const copilotBillingValidationOk = ref(false)
 const copilotBillingValidationMessage = ref('')
 const copilotBillingCreditLimit = ref<number | null>(20000)
+const copilotBillingSafetyMargin = ref<number | null>(200)
 const copilotBillingAutoPauseDisabled = ref(false)
 
 const syncPreviewCredentials = computed(() => {
@@ -3956,6 +3972,7 @@ const applyWindowCostExtra = (extra: Record<string, unknown>) => {
 const applyCopilotBillingGuardExtra = (extra: Record<string, unknown>) => {
   if (form.platform !== 'copilot') {
     delete extra.billing_credit_limit
+    delete extra.billing_safety_margin
     delete extra.billing_auto_pause_disabled
     return
   }
@@ -3963,6 +3980,15 @@ const applyCopilotBillingGuardExtra = (extra: Record<string, unknown>) => {
     extra.billing_credit_limit = copilotBillingCreditLimit.value
   } else {
     delete extra.billing_credit_limit
+  }
+  if (
+    copilotBillingSafetyMargin.value != null &&
+    Number.isFinite(copilotBillingSafetyMargin.value) &&
+    copilotBillingSafetyMargin.value >= 0
+  ) {
+    extra.billing_safety_margin = copilotBillingSafetyMargin.value
+  } else {
+    extra.billing_safety_margin = 200
   }
   if (copilotBillingAutoPauseDisabled.value) {
     extra.billing_auto_pause_disabled = true
@@ -4640,6 +4666,7 @@ const resetForm = () => {
   copilotBillingValidationOk.value = false
   copilotBillingValidationMessage.value = ''
   copilotBillingCreditLimit.value = 20000
+  copilotBillingSafetyMargin.value = 200
   copilotBillingAutoPauseDisabled.value = false
   editQuotaLimit.value = null
   editQuotaDailyLimit.value = null
@@ -5129,9 +5156,7 @@ const handleSubmit = async () => {
 
   form.credentials = credentials
   const extra = buildAnthropicExtra(buildOpenAIExtra()) || {}
-  if (form.platform === 'copilot') {
-    applyCopilotBillingGuardExtra(extra)
-  }
+  applyCopilotBillingGuardExtra(extra)
 
   await doCreateAccount({
     ...form,
@@ -5225,8 +5250,8 @@ const createAccountAndFinish = async (
     }
     if (platform === 'copilot') {
       applyWindowCostExtra(quotaExtra)
-      applyCopilotBillingGuardExtra(quotaExtra)
     }
+    applyCopilotBillingGuardExtra(quotaExtra)
     // Quota notify config
     writeQuotaNotifyToExtra(quotaExtra, 'create')
     if (Object.keys(quotaExtra).length > 0) {

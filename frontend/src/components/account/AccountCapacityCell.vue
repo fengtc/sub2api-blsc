@@ -38,8 +38,8 @@
       v-if="showCopilotBilling"
       :color-class="copilotBillingClass"
       :tooltip="copilotBillingTooltip"
-      :current="formatCredits(account.copilot_billing_usage?.gross_quantity)"
-      :max="formatCredits(copilotBillingCreditLimit)"
+      :current="formatCopilotCredits(account.copilot_billing_usage?.gross_quantity)"
+      :max="formatCopilotCredits(copilotBillingCreditLimit)"
       suffix="AI"
     >
       <svg class="h-2.5 w-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -47,6 +47,20 @@
         <path stroke-linecap="round" stroke-linejoin="round" d="M7.5 9.75h9m-9 3h5.25" />
       </svg>
     </CapacityBadge>
+
+    <span
+      v-if="showCopilotMonthlyQuotaPause"
+      data-testid="copilot-monthly-quota-pause"
+      class="inline-flex items-center gap-1 rounded-md bg-red-100 px-1.5 py-px text-[10px] font-medium leading-tight text-red-700 dark:bg-red-900/30 dark:text-red-400"
+      :title="copilotMonthlyQuotaPauseTooltip"
+    >
+      <svg class="h-2.5 w-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6l4 2" />
+        <circle cx="12" cy="12" r="9" />
+      </svg>
+      <span>Paused until</span>
+      <span class="font-mono">{{ copilotMonthlyQuotaPauseUntil }}</span>
+    </span>
   </div>
 </template>
 
@@ -194,10 +208,12 @@ const formatCost = (value: number | null | undefined) => {
   return value.toFixed(2)
 }
 
-const formatCredits = (value: number | null | undefined) => {
-  if (value === null || value === undefined) return '0'
-  if (value >= 1000) return `${(value / 1000).toFixed(value >= 10000 ? 1 : 2)}k`
-  return value.toFixed(value % 1 === 0 ? 0 : 2)
+const formatCopilotCredits = (value: number | null | undefined) => {
+  const amount = typeof value === 'number' && Number.isFinite(value) ? value : 0
+  return new Intl.NumberFormat('en-US', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 4,
+  }).format(amount)
 }
 
 // ====== 配额 ======
@@ -220,6 +236,8 @@ const showCopilotBilling = computed(() =>
 )
 
 const DEFAULT_COPILOT_BILLING_CREDIT_LIMIT = 20000
+const DEFAULT_COPILOT_BILLING_SAFETY_MARGIN = 200
+
 const copilotBillingCreditLimit = computed(() => {
   const configured = Number(props.account.extra?.billing_credit_limit)
   return Number.isFinite(configured) && configured > 0
@@ -227,10 +245,55 @@ const copilotBillingCreditLimit = computed(() => {
     : DEFAULT_COPILOT_BILLING_CREDIT_LIMIT
 })
 
+const copilotBillingSafetyMargin = computed(() => {
+  const raw = props.account.extra?.billing_safety_margin
+  const configured = Number(raw)
+  return raw !== null && raw !== undefined && Number.isFinite(configured) && configured >= 0
+    ? configured
+    : DEFAULT_COPILOT_BILLING_SAFETY_MARGIN
+})
+
+const copilotBillingPreventionThreshold = computed(() =>
+  Math.max(0, copilotBillingCreditLimit.value - copilotBillingSafetyMargin.value)
+)
+
+const copilotBillingAutoPauseDisabled = computed(() =>
+  props.account.extra?.billing_auto_pause_disabled === true
+)
+
+const COPILOT_MONTHLY_QUOTA_EXCEEDED_REASON = 'copilot_monthly_quota_exceeded'
+
+const copilotMonthlyQuotaPauseUntil = computed(() => {
+  if (
+    props.account.platform !== 'copilot' ||
+    props.account.temp_unschedulable_reason !== COPILOT_MONTHLY_QUOTA_EXCEEDED_REASON ||
+    !props.account.temp_unschedulable_until
+  ) {
+    return ''
+  }
+
+  const pauseUntil = new Date(props.account.temp_unschedulable_until)
+  if (!Number.isFinite(pauseUntil.getTime()) || pauseUntil.getTime() <= Date.now()) return ''
+
+  const iso = pauseUntil.toISOString()
+  return `${iso.slice(0, 10)} ${iso.slice(11, 16)} UTC`
+})
+
+const showCopilotMonthlyQuotaPause = computed(() => copilotMonthlyQuotaPauseUntil.value !== '')
+
+const copilotMonthlyQuotaPauseTooltip = computed(() => {
+  if (!showCopilotMonthlyQuotaPause.value) return ''
+  return `Copilot monthly quota exceeded; scheduling paused until ${copilotMonthlyQuotaPauseUntil.value}`
+})
+
 const copilotBillingClass = computed(() => {
   const usage = props.account.copilot_billing_usage
   if (!usage) return ''
+  if (showCopilotMonthlyQuotaPause.value) return 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
   if (usage.gross_quantity >= copilotBillingCreditLimit.value) return 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
+  if (!copilotBillingAutoPauseDisabled.value && usage.gross_quantity >= copilotBillingPreventionThreshold.value) {
+    return 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
+  }
   if (usage.gross_quantity >= copilotBillingCreditLimit.value * 0.8) return 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400'
   return 'bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-300'
 })
@@ -238,6 +301,10 @@ const copilotBillingClass = computed(() => {
 const copilotBillingTooltip = computed(() => {
   const usage = props.account.copilot_billing_usage
   if (!usage) return ''
-  return `GitHub Billing ${usage.period} ${usage.username}: gross ${formatCredits(usage.gross_quantity)} / ${formatCredits(copilotBillingCreditLimit.value)} AI credits, net $${formatCost(usage.net_amount)}`
+  const pauseState = showCopilotMonthlyQuotaPause.value
+    ? `; paused until ${copilotMonthlyQuotaPauseUntil.value}`
+    : ''
+  const preventionState = copilotBillingAutoPauseDisabled.value ? ' (disabled)' : ''
+  return `GitHub Billing ${usage.period} ${usage.username}: gross ${formatCopilotCredits(usage.gross_quantity)} / ${formatCopilotCredits(copilotBillingCreditLimit.value)} AI credits; prevention threshold ${formatCopilotCredits(copilotBillingPreventionThreshold.value)}${preventionState}, net $${formatCost(usage.net_amount)}${pauseState}`
 })
 </script>

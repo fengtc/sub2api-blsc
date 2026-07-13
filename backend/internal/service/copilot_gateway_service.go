@@ -24,6 +24,15 @@ import (
 // Used to rewrite these for clients that expect dash-separated versions.
 var claudeModelDotPattern = regexp.MustCompile(`claude-(?:sonnet|opus|haiku)-\d+\.\d+`)
 
+const (
+	copilotMonthlyQuotaExceededReason = "copilot_monthly_quota_exceeded"
+	copilotAccountStateUpdateTimeout  = 5 * time.Second
+)
+
+type copilotTempUnschedulableRepository interface {
+	SetTempUnschedulable(ctx context.Context, id int64, until time.Time, reason string) error
+}
+
 // CopilotGatewayService handles forwarding requests to the GitHub Copilot API.
 //
 // It supports:
@@ -33,9 +42,10 @@ var claudeModelDotPattern = regexp.MustCompile(`claude-(?:sonnet|opus|haiku)-\d+
 // Authentication is handled via CopilotTokenProvider, which exchanges
 // GitHub tokens for short-lived Copilot API tokens.
 type CopilotGatewayService struct {
-	tokenProvider *CopilotTokenProvider
-	httpClient    *http.Client
-	cfg           *config.Config
+	tokenProvider         *CopilotTokenProvider
+	tempUnschedulableRepo copilotTempUnschedulableRepository
+	httpClient            *http.Client
+	cfg                   *config.Config
 }
 
 // NewCopilotGatewayService creates a new CopilotGatewayService.
@@ -47,9 +57,14 @@ func NewCopilotGatewayService(
 	if len(configs) > 0 {
 		cfg = configs[0]
 	}
+	var tempUnschedulableRepo copilotTempUnschedulableRepository
+	if tokenProvider != nil {
+		tempUnschedulableRepo = tokenProvider.accountRepo
+	}
 	return &CopilotGatewayService{
-		tokenProvider: tokenProvider,
-		cfg:           cfg,
+		tokenProvider:         tokenProvider,
+		tempUnschedulableRepo: tempUnschedulableRepo,
+		cfg:                   cfg,
 		httpClient: &http.Client{
 			Timeout: 5 * time.Minute, // long timeout for streaming
 		},
@@ -270,6 +285,18 @@ func (s *CopilotGatewayService) handleErrorResponse(
 	}
 	slog.Warn("copilot upstream error", logAttrs...)
 
+	if isCopilotQuotaExceededResponse(resp.StatusCode, body) {
+		until := nextCopilotMonthlyQuotaReset(time.Now())
+		s.persistCopilotMonthlyQuotaExceeded(c, account, until)
+		return nil, &UpstreamFailoverError{
+			StatusCode:              resp.StatusCode,
+			ResponseBody:            body,
+			ResponseHeaders:         resp.Header.Clone(),
+			TempUnschedulableUntil:  &until,
+			TempUnschedulableReason: copilotMonthlyQuotaExceededReason,
+		}
+	}
+
 	// Handle specific error codes
 	switch resp.StatusCode {
 	case http.StatusUnauthorized:
@@ -285,6 +312,60 @@ func (s *CopilotGatewayService) handleErrorResponse(
 	return &CopilotForwardResult{
 		StatusCode: resp.StatusCode,
 	}, nil
+}
+
+func isCopilotQuotaExceededResponse(statusCode int, body []byte) bool {
+	if statusCode != http.StatusPaymentRequired {
+		return false
+	}
+	var payload struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return false
+	}
+	return payload.Error.Code == "quota_exceeded"
+}
+
+func nextCopilotMonthlyQuotaReset(now time.Time) time.Time {
+	now = now.UTC()
+	return time.Date(now.Year(), now.Month()+1, 1, 0, 0, 0, 0, time.UTC)
+}
+
+func (s *CopilotGatewayService) persistCopilotMonthlyQuotaExceeded(c *gin.Context, account *Account, until time.Time) {
+	accountID := int64(0)
+	if account != nil {
+		accountID = account.ID
+	}
+	if s == nil || s.tempUnschedulableRepo == nil || accountID <= 0 {
+		slog.Error("copilot monthly quota temp unschedulable persistence unavailable",
+			"account_id", accountID,
+			"until", until,
+		)
+		return
+	}
+
+	baseCtx := context.Background()
+	if c != nil && c.Request != nil {
+		baseCtx = context.WithoutCancel(c.Request.Context())
+	}
+	stateCtx, cancel := context.WithTimeout(baseCtx, copilotAccountStateUpdateTimeout)
+	defer cancel()
+
+	if err := s.tempUnschedulableRepo.SetTempUnschedulable(stateCtx, accountID, until, copilotMonthlyQuotaExceededReason); err != nil {
+		slog.Error("copilot monthly quota temp unschedulable persistence failed",
+			"account_id", accountID,
+			"until", until,
+			"error", err,
+		)
+		return
+	}
+	slog.Warn("copilot monthly quota exhausted; account temporarily unschedulable",
+		"account_id", accountID,
+		"until", until,
+	)
 }
 
 func extractRequestModel(body []byte) string {

@@ -257,6 +257,7 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 				err = errors.New("copilot gateway service is not configured")
 			} else {
 				copilotResult, copilotErr := h.copilotGatewayService.ForwardChatCompletions(c.Request.Context(), c, account, forwardBody)
+				syncCopilotBillingGuardFromFailover(account, copilotErr)
 				err = copilotErr
 				if copilotResult != nil {
 					copilotStatusCode = copilotResult.StatusCode

@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
@@ -14,7 +15,15 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/service"
 )
 
-const defaultCopilotBillingCreditLimit = 20000.0
+const (
+	defaultCopilotBillingCreditLimit  = 20000.0
+	defaultCopilotBillingSafetyMargin = 200.0
+
+	copilotBillingNormalCacheTTL       = 10 * time.Minute
+	copilotBillingNearLimitCacheTTL    = time.Minute
+	copilotBillingExhaustedCacheTTL    = 30 * time.Minute
+	copilotBillingFetchFailureRetryTTL = time.Minute
+)
 
 type copilotBillingGuardUsageResponse struct {
 	User       string                         `json:"user,omitempty"`
@@ -26,56 +35,159 @@ type copilotBillingGuardUsageItem struct {
 }
 
 type copilotBillingGuardCacheEntry struct {
-	usedCredits float64
-	expiresAt   time.Time
+	usedCredits   float64
+	expiresAt     time.Time
+	forceSkip     bool
+	authoritative bool
 }
 
 var copilotBillingGuardCache sync.Map
 
 func shouldSkipCopilotAccountForBilling(ctx context.Context, account *service.Account) (bool, float64, float64) {
+	return shouldSkipCopilotAccountForBillingWithFetcher(ctx, account, fetchCopilotBillingGuardUsedCredits)
+}
+
+type copilotBillingGuardFetcher func(context.Context, string, string, int, int) (float64, error)
+
+func shouldSkipCopilotAccountForBillingWithFetcher(ctx context.Context, account *service.Account, fetch copilotBillingGuardFetcher) (bool, float64, float64) {
 	if account == nil || account.Platform != service.PlatformCopilot || account.Type != service.AccountTypeAPIKey {
 		return false, 0, 0
 	}
-	if copilotBillingAutoPauseDisabled(account) {
-		return false, 0, 0
-	}
 	username, token := copilotBillingGuardCredentials(account)
-	if username == "" || token == "" {
+	if token == "" {
 		return false, 0, 0
 	}
-	limit := copilotBillingCreditLimit(account)
-	if limit <= 0 {
+	configuredLimit := copilotBillingCreditLimit(account)
+	if configuredLimit <= 0 {
 		return false, 0, 0
 	}
+	safetyMargin := copilotBillingSafetyMargin(account, configuredLimit)
+	stopLimit := copilotBillingGuardStopLimitForAccount(account, configuredLimit)
 
 	now := time.Now().UTC()
-	period := fmt.Sprintf("%04d-%02d", now.Year(), int(now.Month()))
-	tokenHash := sha256.Sum256([]byte(token))
-	cacheKey := fmt.Sprintf("%d:%s:%x", account.ID, period, tokenHash[:8])
+	cacheKey := copilotBillingGuardCacheKey(account.ID, token, now)
+	var lastGood *copilotBillingGuardCacheEntry
 	if cached, ok := copilotBillingGuardCache.Load(cacheKey); ok {
-		entry, _ := cached.(copilotBillingGuardCacheEntry)
-		if now.Before(entry.expiresAt) {
-			return entry.usedCredits >= limit, entry.usedCredits, limit
+		entry, valid := cached.(copilotBillingGuardCacheEntry)
+		if valid {
+			lastGood = &entry
+			if now.Before(entry.expiresAt) {
+				if entry.authoritative || !copilotBillingAutoPauseDisabled(account) {
+					return entry.forceSkip || entry.usedCredits >= stopLimit, entry.usedCredits, stopLimit
+				}
+				return false, entry.usedCredits, stopLimit
+			}
+		} else {
+			copilotBillingGuardCache.Delete(cacheKey)
 		}
-		copilotBillingGuardCache.Delete(cacheKey)
+	}
+	// The switch only disables proactive Billing API checks. An authoritative
+	// upstream 402 cached above still wins.
+	if copilotBillingAutoPauseDisabled(account) {
+		return false, 0, stopLimit
+	}
+	if username == "" {
+		return false, 0, stopLimit
 	}
 
 	fetchCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
-	used, err := fetchCopilotBillingGuardUsedCredits(fetchCtx, username, token, now.Year(), int(now.Month()))
+	used, err := fetch(fetchCtx, username, token, now.Year(), int(now.Month()))
 	if err != nil {
-		return false, 0, limit
+		slog.Warn("copilot_billing_guard_fetch_failed", "account_id", account.ID, "error", err)
+		if lastGood != nil {
+			// Keep serving the last successful observation and retry soon. In
+			// particular, never turn an exhausted account back on just because
+			// GitHub Billing is temporarily unavailable.
+			lastGood.expiresAt = now.Add(copilotBillingFetchFailureRetryTTL)
+			if copilotBillingGuardNearLimit(lastGood.usedCredits, stopLimit, safetyMargin) {
+				lastGood.forceSkip = true
+			}
+			copilotBillingGuardCache.Store(cacheKey, *lastGood)
+			return lastGood.forceSkip || lastGood.usedCredits >= stopLimit, lastGood.usedCredits, stopLimit
+		}
+		return false, 0, stopLimit
 	}
 
-	ttl := 10 * time.Minute
-	if used >= limit {
-		ttl = 30 * time.Minute
-	}
+	ttl := copilotBillingGuardCacheTTL(used, stopLimit, safetyMargin)
 	copilotBillingGuardCache.Store(cacheKey, copilotBillingGuardCacheEntry{
 		usedCredits: used,
 		expiresAt:   now.Add(ttl),
 	})
-	return used >= limit, used, limit
+	return used >= stopLimit, used, stopLimit
+}
+
+// markCopilotBillingGuardExhausted lets an upstream 402/quota_exceeded
+// response trip the local guard immediately, without waiting for the next
+// GitHub Billing refresh.
+func markCopilotBillingGuardExhausted(account *service.Account) bool {
+	if account == nil || account.Platform != service.PlatformCopilot || account.Type != service.AccountTypeAPIKey {
+		return false
+	}
+	_, token := copilotBillingGuardCredentials(account)
+	if token == "" {
+		return false
+	}
+	configuredLimit := copilotBillingCreditLimit(account)
+	if configuredLimit <= 0 {
+		return false
+	}
+	stopLimit := copilotBillingGuardStopLimitForAccount(account, configuredLimit)
+	now := time.Now().UTC()
+	copilotBillingGuardCache.Store(copilotBillingGuardCacheKey(account.ID, token, now), copilotBillingGuardCacheEntry{
+		usedCredits:   stopLimit,
+		expiresAt:     copilotBillingGuardAuthoritativeExpiry(now),
+		forceSkip:     true,
+		authoritative: true,
+	})
+	return true
+}
+
+func copilotBillingGuardCacheKey(accountID int64, token string, now time.Time) string {
+	utcNow := now.UTC()
+	period := fmt.Sprintf("%04d-%02d", utcNow.Year(), int(utcNow.Month()))
+	tokenHash := sha256.Sum256([]byte(token))
+	return fmt.Sprintf("%d:%s:%x", accountID, period, tokenHash[:8])
+}
+
+func copilotBillingGuardStopLimit(configuredLimit float64) float64 {
+	return copilotBillingGuardStopLimitWithMargin(configuredLimit, defaultCopilotBillingSafetyMargin)
+}
+
+func copilotBillingGuardStopLimitForAccount(account *service.Account, configuredLimit float64) float64 {
+	return copilotBillingGuardStopLimitWithMargin(configuredLimit, copilotBillingSafetyMargin(account, configuredLimit))
+}
+
+func copilotBillingGuardStopLimitWithMargin(configuredLimit, safetyMargin float64) float64 {
+	if configuredLimit <= 0 {
+		return 0
+	}
+	if safetyMargin < 0 {
+		safetyMargin = 0
+	}
+	if safetyMargin > configuredLimit {
+		safetyMargin = configuredLimit
+	}
+	return configuredLimit - safetyMargin
+}
+
+func copilotBillingGuardCacheTTL(used, stopLimit, safetyMargin float64) time.Duration {
+	if used >= stopLimit {
+		return copilotBillingExhaustedCacheTTL
+	}
+	if copilotBillingGuardNearLimit(used, stopLimit, safetyMargin) {
+		return copilotBillingNearLimitCacheTTL
+	}
+	return copilotBillingNormalCacheTTL
+}
+
+func copilotBillingGuardNearLimit(used, stopLimit, safetyMargin float64) bool {
+	return safetyMargin > 0 && used >= stopLimit-safetyMargin
+}
+
+func copilotBillingGuardAuthoritativeExpiry(now time.Time) time.Time {
+	utcNow := now.UTC()
+	return time.Date(utcNow.Year(), utcNow.Month()+1, 1, 0, 0, 0, 0, time.UTC)
 }
 
 func copilotBillingGuardCredentials(account *service.Account) (string, string) {
@@ -99,6 +211,24 @@ func copilotBillingCreditLimit(account *service.Account) float64 {
 	return defaultCopilotBillingCreditLimit
 }
 
+// copilotBillingSafetyMargin returns an absolute AI-credit margin. An
+// explicitly configured zero disables proactive headroom while leaving the
+// authoritative upstream-402 guard intact.
+func copilotBillingSafetyMargin(account *service.Account, configuredLimit float64) float64 {
+	margin := defaultCopilotBillingSafetyMargin
+	if account != nil && account.Extra != nil {
+		if value, exists := account.Extra["billing_safety_margin"]; exists {
+			if parsed, valid := parseCopilotBillingFloatOK(value); valid && parsed >= 0 {
+				margin = parsed
+			}
+		}
+	}
+	if margin > configuredLimit {
+		return configuredLimit
+	}
+	return margin
+}
+
 func copilotBillingAutoPauseDisabled(account *service.Account) bool {
 	if account == nil || account.Extra == nil {
 		return false
@@ -112,20 +242,25 @@ func copilotBillingAutoPauseDisabled(account *service.Account) bool {
 }
 
 func parseCopilotBillingFloat(value any) float64 {
+	n, _ := parseCopilotBillingFloatOK(value)
+	return n
+}
+
+func parseCopilotBillingFloatOK(value any) (float64, bool) {
 	switch v := value.(type) {
 	case float64:
-		return v
+		return v, true
 	case float32:
-		return float64(v)
+		return float64(v), true
 	case int:
-		return float64(v)
+		return float64(v), true
 	case int64:
-		return float64(v)
+		return float64(v), true
 	case json.Number:
-		n, _ := v.Float64()
-		return n
+		n, err := v.Float64()
+		return n, err == nil
 	default:
-		return 0
+		return 0, false
 	}
 }
 

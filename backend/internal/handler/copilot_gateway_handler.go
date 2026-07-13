@@ -204,6 +204,7 @@ func (h *CopilotGatewayHandler) ChatCompletions(c *gin.Context) {
 
 		// Forward request to Copilot API
 		result, fwdErr := h.copilotGatewayService.ForwardChatCompletions(ctx, c, account, body)
+		syncCopilotBillingGuardFromFailover(account, fwdErr)
 		if fwdErr != nil {
 			if accountReleaseFunc != nil {
 				accountReleaseFunc()
@@ -487,6 +488,7 @@ func (h *CopilotGatewayHandler) Messages(c *gin.Context) {
 
 		// Forward request, translating Anthropic ↔ Copilot.
 		result, fwdErr := h.copilotGatewayService.ForwardMessages(ctx, c, account, body)
+		syncCopilotBillingGuardFromFailover(account, fwdErr)
 		if fwdErr != nil {
 			if accountReleaseFunc != nil {
 				accountReleaseFunc()

@@ -132,17 +132,32 @@
                 class="input"
                 placeholder="20000"
               />
-              <p class="input-hint">达到该额度后自动跳过此账号调度。</p>
+              <p class="input-hint">Copilot 每月 AI Credits 总额度。</p>
             </div>
-            <label class="flex items-start gap-3 rounded-lg border border-gray-200 p-3 dark:border-dark-600">
+            <div>
+              <label class="input-label">安全余量（AI Credits）</label>
+              <input
+                v-model.number="editCopilotBillingSafetyMargin"
+                type="number"
+                min="0"
+                step="1"
+                class="input"
+                placeholder="200"
+              />
+              <p class="input-hint">默认 200，允许设为 0。</p>
+            </div>
+            <p class="input-hint sm:col-span-2">Billing API 预防停调度阈值 = 月额度 - 安全余量。</p>
+            <label class="flex items-start gap-3 rounded-lg border border-gray-200 p-3 dark:border-dark-600 sm:col-span-2">
               <input
                 v-model="editCopilotBillingAutoPauseDisabled"
                 type="checkbox"
                 class="mt-1 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
               />
               <span>
-                <span class="block text-sm font-medium text-gray-700 dark:text-gray-300">关闭额度用完自动停止调度</span>
-                <span class="mt-1 block text-xs text-gray-500 dark:text-gray-400">仅展示官方用量，不参与调度保护。</span>
+                <span class="block text-sm font-medium text-gray-700 dark:text-gray-300">关闭 Billing API 预防停调度</span>
+                <span class="mt-1 block text-xs text-gray-500 dark:text-gray-400">
+                  仅关闭 Billing API 预防停调度；上游 402 quota_exceeded 仍会作为权威信号停止调度。
+                </span>
               </span>
             </label>
           </div>
@@ -2703,6 +2718,7 @@ const copilotBillingValidating = ref(false)
 const copilotBillingValidationOk = ref(false)
 const copilotBillingValidationMessage = ref('')
 const editCopilotBillingCreditLimit = ref<number | null>(20000)
+const editCopilotBillingSafetyMargin = ref<number | null>(200)
 const editCopilotBillingAutoPauseDisabled = ref(false)
 // Bedrock credentials
 const editBedrockAccessKeyId = ref('')
@@ -2885,6 +2901,7 @@ const applyWindowCostExtra = (extra: Record<string, unknown>) => {
 const applyCopilotBillingGuardExtra = (extra: Record<string, unknown>) => {
   if (props.account?.platform !== 'copilot') {
     delete extra.billing_credit_limit
+    delete extra.billing_safety_margin
     delete extra.billing_auto_pause_disabled
     return
   }
@@ -2892,6 +2909,15 @@ const applyCopilotBillingGuardExtra = (extra: Record<string, unknown>) => {
     extra.billing_credit_limit = editCopilotBillingCreditLimit.value
   } else {
     delete extra.billing_credit_limit
+  }
+  if (
+    editCopilotBillingSafetyMargin.value != null &&
+    Number.isFinite(editCopilotBillingSafetyMargin.value) &&
+    editCopilotBillingSafetyMargin.value >= 0
+  ) {
+    extra.billing_safety_margin = editCopilotBillingSafetyMargin.value
+  } else {
+    extra.billing_safety_margin = 200
   }
   if (editCopilotBillingAutoPauseDisabled.value) {
     extra.billing_auto_pause_disabled = true
@@ -3856,6 +3882,7 @@ function loadQuotaControlSettings(account: Account) {
   customBaseUrlEnabled.value = false
   customBaseUrl.value = ''
   editCopilotBillingCreditLimit.value = 20000
+  editCopilotBillingSafetyMargin.value = 200
   editCopilotBillingAutoPauseDisabled.value = false
 
   if (account.platform !== 'copilot' && (account.platform !== 'anthropic' || (account.type !== 'oauth' && account.type !== 'setup-token'))) {
@@ -3865,7 +3892,11 @@ function loadQuotaControlSettings(account: Account) {
   if (account.platform === 'copilot') {
     const extra = (account.extra || {}) as Record<string, unknown>
     const limit = Number(extra.billing_credit_limit)
+    const rawSafetyMargin = extra.billing_safety_margin
+    const safetyMargin = Number(rawSafetyMargin)
     editCopilotBillingCreditLimit.value = Number.isFinite(limit) && limit > 0 ? limit : 20000
+    editCopilotBillingSafetyMargin.value =
+      rawSafetyMargin != null && Number.isFinite(safetyMargin) && safetyMargin >= 0 ? safetyMargin : 200
     editCopilotBillingAutoPauseDisabled.value = extra.billing_auto_pause_disabled === true
   }
 
@@ -4645,8 +4676,8 @@ const handleSubmit = async () => {
       }
       if (props.account.platform === 'copilot') {
         applyWindowCostExtra(newExtra)
-        applyCopilotBillingGuardExtra(newExtra)
       }
+      applyCopilotBillingGuardExtra(newExtra)
       // Quota notify config
       writeQuotaNotifyToExtra(newExtra, 'update')
       updatePayload.extra = newExtra
