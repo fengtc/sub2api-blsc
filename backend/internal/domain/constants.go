@@ -24,6 +24,7 @@ const (
 	PlatformAntigravity = "antigravity"
 	PlatformCopilot     = "copilot" // GitHub Copilot
 	PlatformGrok        = "grok"
+	PlatformComposite   = "composite"
 )
 
 // Account type constants
@@ -134,6 +135,7 @@ var DefaultBedrockModelMapping = map[string]string{
 	// Claude Fable
 	"claude-fable-5": "anthropic.claude-fable-5",
 	// Claude Opus
+	"claude-opus-5":            "us.anthropic.claude-opus-5-v1",
 	"claude-opus-4-8":          "us.anthropic.claude-opus-4-8-v1",
 	"claude-opus-4-7":          "us.anthropic.claude-opus-4-7-v1",
 	"claude-opus-4-6-thinking": "us.anthropic.claude-opus-4-6-v1",
