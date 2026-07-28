@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/copilot"
 	"github.com/Wei-Shaw/sub2api/internal/util/urlvalidator"
 	"github.com/gin-gonic/gin"
@@ -99,9 +100,10 @@ func (s *CopilotGatewayService) resolveBaseURL(account *Account) (string, error)
 
 // CopilotForwardResult holds the result of a Copilot API request.
 type CopilotForwardResult struct {
-	StatusCode int
-	Model      string
-	Usage      *CopilotUsage
+	StatusCode   int
+	Model        string
+	Usage        *CopilotUsage
+	FirstTokenMs *int
 }
 
 // CopilotUsage tracks token usage from a Copilot API response.
@@ -177,7 +179,7 @@ func (s *CopilotGatewayService) ForwardChatCompletions(
 
 	// Handle streaming response
 	if isStream {
-		return s.handleStreamingResponse(c, resp, model)
+		return s.handleStreamingResponse(c, resp, model, startTime)
 	}
 
 	// Handle non-streaming response
@@ -189,6 +191,7 @@ func (s *CopilotGatewayService) handleStreamingResponse(
 	c *gin.Context,
 	resp *http.Response,
 	model string,
+	startTime time.Time,
 ) (*CopilotForwardResult, error) {
 	defer func() { _ = resp.Body.Close() }()
 
@@ -203,6 +206,7 @@ func (s *CopilotGatewayService) handleStreamingResponse(
 	}
 
 	usage := &CopilotUsage{}
+	var firstTokenMs *int
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Buffer(make([]byte, 0, 256*1024), 256*1024)
 
@@ -214,6 +218,13 @@ func (s *CopilotGatewayService) handleStreamingResponse(
 			data := line[6:]
 			if data != "[DONE]" {
 				s.parseStreamUsage(data, usage)
+				var chunk apicompat.ChatCompletionsChunk
+				if err := json.Unmarshal([]byte(data), &chunk); err == nil &&
+					firstTokenMs == nil &&
+					chatChunkStartsResponsesOutput(&chunk) {
+					ms := int(time.Since(startTime).Milliseconds())
+					firstTokenMs = &ms
+				}
 			}
 		}
 
@@ -227,9 +238,10 @@ func (s *CopilotGatewayService) handleStreamingResponse(
 	}
 
 	return &CopilotForwardResult{
-		StatusCode: http.StatusOK,
-		Model:      model,
-		Usage:      usage,
+		StatusCode:   http.StatusOK,
+		Model:        model,
+		Usage:        usage,
+		FirstTokenMs: firstTokenMs,
 	}, nil
 }
 
@@ -586,7 +598,7 @@ func (s *CopilotGatewayService) ForwardMessages(
 	}
 
 	if isStream {
-		return s.handleMessagesStreamingResponse(c, resp, model)
+		return s.handleMessagesStreamingResponse(c, resp, model, startTime)
 	}
 	return s.handleMessagesNonStreamingResponse(c, resp, model)
 }
@@ -631,6 +643,7 @@ func (s *CopilotGatewayService) handleMessagesStreamingResponse(
 	c *gin.Context,
 	resp *http.Response,
 	model string,
+	startTime time.Time,
 ) (*CopilotForwardResult, error) {
 	defer func() { _ = resp.Body.Close() }()
 
@@ -644,31 +657,62 @@ func (s *CopilotGatewayService) handleMessagesStreamingResponse(
 		return nil, fmt.Errorf("copilot messages: response writer does not support flushing")
 	}
 
-	state := &copilotStreamState{
-		toolCalls: make(map[int]copilotToolCallInfo),
-	}
+	state := apicompat.NewChatCompletionsToAnthropicStreamState(model)
 	usage := &CopilotUsage{}
+	var firstTokenMs *int
+	clientDisconnected := false
+	sawDone := false
+
+	emitEvents := func(events []apicompat.AnthropicStreamEvent) {
+		if clientDisconnected {
+			return
+		}
+		for _, evt := range events {
+			sse, err := apicompat.ResponsesAnthropicEventToSSE(evt)
+			if err != nil {
+				slog.Debug("copilot messages stream: failed to marshal event",
+					"event_type", evt.Type, "error", err)
+				continue
+			}
+			if _, err := fmt.Fprint(c.Writer, sse); err != nil {
+				clientDisconnected = true
+				break
+			}
+		}
+		if !clientDisconnected && len(events) > 0 {
+			flusher.Flush()
+		}
+	}
 
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Buffer(make([]byte, 0, 256*1024), 256*1024)
 
 	for scanner.Scan() {
 		line := scanner.Text()
-
-		if !strings.HasPrefix(line, "data: ") {
-			// Forward blank lines / non-data lines as-is to maintain SSE framing.
-			fmt.Fprintf(c.Writer, "%s\n", line)
-			flusher.Flush()
+		data, ok := extractOpenAISSEDataLine(line)
+		if !ok {
+			// Preserve SSE comments as downstream keepalives during long
+			// Copilot TTFT waits. Event-name and blank framing lines belong to
+			// the upstream OpenAI stream and must not leak into Anthropic SSE.
+			if strings.HasPrefix(line, ":") && !clientDisconnected {
+				if _, err := fmt.Fprintf(c.Writer, "%s\n\n", line); err != nil {
+					clientDisconnected = true
+				} else {
+					flusher.Flush()
+				}
+			}
 			continue
 		}
-
-		data := line[6:]
+		data = strings.TrimSpace(data)
+		if data == "" {
+			continue
+		}
 		if data == "[DONE]" {
-			// Anthropic clients don't expect [DONE]; just stop.
+			sawDone = true
 			break
 		}
 
-		var chunk openAIChatStreamChunk
+		var chunk apicompat.ChatCompletionsChunk
 		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
 			slog.Debug("copilot messages stream: skip unparseable chunk", "data", data)
 			continue
@@ -681,22 +725,37 @@ func (s *CopilotGatewayService) handleMessagesStreamingResponse(
 			usage.TotalTokens = chunk.Usage.TotalTokens
 		}
 
-		// Translate chunk → Anthropic events.
-		events := translateChunkToAnthropicEvents(&chunk, state)
-		for _, evt := range events {
-			fmt.Fprintf(c.Writer, "event: %s\ndata: %s\n\n", extractEventType(evt), evt)
-			flusher.Flush()
+		if firstTokenMs == nil && chatChunkStartsResponsesOutput(&chunk) {
+			ms := int(time.Since(startTime).Milliseconds())
+			firstTokenMs = &ms
 		}
+
+		// Copilot commonly sends usage in a trailing choices:[] chunk. Feed
+		// every chunk to the shared bridge and defer terminal events until
+		// [DONE]/EOF so the final message_delta carries the exact usage.
+		emitEvents(apicompat.ChatCompletionsChunkToAnthropicEvents(&chunk, state))
 	}
 
 	if err := scanner.Err(); err != nil {
 		slog.Warn("copilot messages stream scanner error", "error", err)
+		return &CopilotForwardResult{
+			StatusCode:   http.StatusOK,
+			Model:        model,
+			Usage:        usage,
+			FirstTokenMs: firstTokenMs,
+		}, fmt.Errorf("copilot messages: stream usage incomplete: %w", err)
+	}
+
+	emitEvents(apicompat.FinalizeChatCompletionsAnthropicStream(state))
+	if !sawDone {
+		slog.Debug("copilot messages stream ended without [DONE]", "model", model)
 	}
 
 	return &CopilotForwardResult{
-		StatusCode: http.StatusOK,
-		Model:      model,
-		Usage:      usage,
+		StatusCode:   http.StatusOK,
+		Model:        model,
+		Usage:        usage,
+		FirstTokenMs: firstTokenMs,
 	}, nil
 }
 

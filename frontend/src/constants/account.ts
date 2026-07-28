@@ -14,6 +14,18 @@ export const QUOTA_RESET_MODE_ROLLING = 'rolling' as const
 export const QUOTA_RESET_MODE_FIXED = 'fixed' as const
 export type QuotaResetMode = typeof QUOTA_RESET_MODE_ROLLING | typeof QUOTA_RESET_MODE_FIXED
 
+/** GitHub fine-grained PAT creation page prefilled for personal AI Credits billing access. */
+export function buildCopilotBillingPATCreationURL(username = ''): string {
+  const url = new URL('https://github.com/settings/personal-access-tokens/new')
+  url.searchParams.set('name', 'Sub2API Billing')
+  url.searchParams.set('description', 'Read GitHub AI Credits usage')
+  url.searchParams.set('expires_in', '90')
+  url.searchParams.set('plan', 'read')
+  const targetName = username.trim()
+  if (targetName) url.searchParams.set('target_name', targetName)
+  return url.toString()
+}
+
 /** Vertex AI location options for Service Account accounts */
 export const VERTEX_LOCATION_OPTIONS = [
   {

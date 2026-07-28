@@ -1158,6 +1158,11 @@
             "
           />
           <p v-if="apiKeyHint" class="input-hint">{{ apiKeyHint }}</p>
+          <CopilotDeviceAuthorization
+            v-if="form.platform === 'copilot'"
+            class="mt-3"
+            @authorized="handleCopilotDeviceAuthorized"
+          />
         </div>
 
         <div
@@ -1191,11 +1196,11 @@
           </div>
           <div>
             <label class="input-label">Billing PAT</label>
-            <div class="flex gap-2">
+            <div class="flex flex-wrap gap-2 sm:flex-nowrap">
               <input
                 v-model="copilotBillingPAT"
                 type="password"
-                class="input font-mono"
+                class="input min-w-0 flex-1 font-mono"
                 placeholder="github_pat_..."
                 autocomplete="new-password"
                 data-1p-ignore
@@ -1210,8 +1215,17 @@
               >
                 {{ copilotBillingValidating ? '验证中' : '验证' }}
               </button>
+              <a
+                :href="copilotBillingPATCreationURL"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="btn btn-secondary shrink-0"
+                data-testid="create-copilot-billing-pat"
+              >
+                创建 Billing PAT
+              </a>
             </div>
-            <p class="input-hint">需要 GitHub fine-grained PAT：Account permissions -> Plan -> Read-only。留空则按默认方式显示用量。</p>
+            <p class="input-hint">GitHub 页面已预填 Plan: Read。生成后复制到此处并点击验证；留空则按默认方式显示用量。</p>
           </div>
           <p
             v-if="copilotBillingValidationMessage"
@@ -3648,6 +3662,7 @@ import GroupSelector from '@/components/common/GroupSelector.vue'
 import ModelWhitelistSelector from '@/components/account/ModelWhitelistSelector.vue'
 import QuotaLimitCard from '@/components/account/QuotaLimitCard.vue'
 import GrokBaseUrlPresets from '@/components/account/GrokBaseUrlPresets.vue'
+import CopilotDeviceAuthorization from '@/components/account/CopilotDeviceAuthorization.vue'
 import HeaderOverrideEditor from '@/components/account/HeaderOverrideEditor.vue'
 import {
   applyAntigravityProjectID,
@@ -3659,7 +3674,7 @@ import {
 } from '@/components/account/credentialsBuilder'
 import { formatDateTimeLocalInput, parseDateTimeLocalInput } from '@/utils/format'
 import { createStableObjectKeyResolver } from '@/utils/stableObjectKey'
-import { VERTEX_LOCATION_OPTIONS } from '@/constants/account'
+import { buildCopilotBillingPATCreationURL, VERTEX_LOCATION_OPTIONS } from '@/constants/account'
 import {
   OPENAI_WS_MODE_CTX_POOL,
   OPENAI_WS_MODE_OFF,
@@ -3801,6 +3816,9 @@ const copilotBillingValidationMessage = ref('')
 const copilotBillingCreditLimit = ref<number | null>(20000)
 const copilotBillingSafetyMargin = ref<number | null>(200)
 const copilotBillingAutoPauseDisabled = ref(false)
+const copilotBillingPATCreationURL = computed(() =>
+  buildCopilotBillingPATCreationURL(copilotBillingUsername.value)
+)
 
 const syncPreviewCredentials = computed(() => {
   if (!apiKeyValue.value) return undefined
@@ -3834,6 +3852,14 @@ const validateCopilotBillingPAT = async () => {
   } finally {
     copilotBillingValidating.value = false
   }
+}
+
+const handleCopilotDeviceAuthorized = (payload: { token: string; username: string }) => {
+  apiKeyValue.value = payload.token
+  if (payload.username && !copilotBillingUsername.value.trim()) {
+    copilotBillingUsername.value = payload.username
+  }
+  appStore.showSuccess('GitHub 授权成功，Copilot Token 已填入')
 }
 
 const editQuotaLimit = ref<number | null>(null)

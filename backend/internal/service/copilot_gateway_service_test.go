@@ -433,7 +433,7 @@ func TestCopilotGatewayService_HandleStreamingResponse(t *testing.T) {
 		w := httptest.NewRecorder()
 		c, _ := gin.CreateTestContext(w)
 
-		result, err := svc.handleStreamingResponse(c, resp, "gpt-4o")
+		result, err := svc.handleStreamingResponse(c, resp, "gpt-4o", time.Now().Add(-time.Millisecond))
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -450,6 +450,9 @@ func TestCopilotGatewayService_HandleStreamingResponse(t *testing.T) {
 		if result.Usage.TotalTokens != 7 {
 			t.Errorf("TotalTokens = %d, want 7", result.Usage.TotalTokens)
 		}
+		if result.FirstTokenMs == nil {
+			t.Fatal("FirstTokenMs should be recorded for a content chunk")
+		}
 
 		// Verify SSE content was forwarded
 		body := w.Body.String()
@@ -458,6 +461,125 @@ func TestCopilotGatewayService_HandleStreamingResponse(t *testing.T) {
 		}
 		if !strings.Contains(body, "[DONE]") {
 			t.Error("response should contain '[DONE]'")
+		}
+	})
+}
+
+func TestCopilotGatewayService_HandleMessagesStreamingResponse(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	svc := &CopilotGatewayService{}
+
+	t.Run("usage-only chunk is included in final Anthropic usage", func(t *testing.T) {
+		sseBody := strings.Join([]string{
+			": upstream-keepalive",
+			"",
+			`data: {"id":"chatcmpl-1","model":"claude-sonnet-5","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}`,
+			"",
+			`data: {"id":"chatcmpl-1","model":"claude-sonnet-5","choices":[{"index":0,"delta":{"content":"Hello"},"finish_reason":null}]}`,
+			"",
+			`data: {"id":"chatcmpl-1","model":"claude-sonnet-5","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+			"",
+			`data: {"id":"chatcmpl-1","model":"claude-sonnet-5","choices":[],"usage":{"prompt_tokens":11,"completion_tokens":2,"total_tokens":13}}`,
+			"",
+			"data: [DONE]",
+			"",
+		}, "\n")
+		resp := &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       copilotStringReadCloser(sseBody),
+		}
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+
+		result, err := svc.handleMessagesStreamingResponse(
+			c,
+			resp,
+			"claude-sonnet-5",
+			time.Now().Add(-time.Millisecond),
+		)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if result.Usage == nil ||
+			result.Usage.PromptTokens != 11 ||
+			result.Usage.CompletionTokens != 2 ||
+			result.Usage.TotalTokens != 13 {
+			t.Fatalf("unexpected usage: %#v", result.Usage)
+		}
+		if result.FirstTokenMs == nil {
+			t.Fatal("FirstTokenMs should be recorded for the content chunk")
+		}
+
+		body := w.Body.String()
+		if strings.Count(body, "event: message_stop") != 1 {
+			t.Fatalf("message_stop count = %d, want 1\n%s", strings.Count(body, "event: message_stop"), body)
+		}
+		if strings.Count(body, "event: message_delta") != 1 {
+			t.Fatalf("message_delta count = %d, want 1\n%s", strings.Count(body, "event: message_delta"), body)
+		}
+		if !strings.Contains(body, `"usage":{"input_tokens":11,"output_tokens":2,`) {
+			t.Fatalf("final message_delta should carry exact usage:\n%s", body)
+		}
+		if strings.Contains(body, "[DONE]") {
+			t.Fatalf("Anthropic stream must not expose OpenAI [DONE]:\n%s", body)
+		}
+		if !strings.Contains(body, ": upstream-keepalive\n\n") {
+			t.Fatalf("SSE comment keepalive should be preserved:\n%s", body)
+		}
+		if usageAt, stopAt := strings.Index(body, `"input_tokens":11`), strings.Index(body, "event: message_stop"); usageAt < 0 || stopAt < usageAt {
+			t.Fatalf("message_stop must follow final usage:\n%s", body)
+		}
+	})
+
+	t.Run("usage-only stream does not set first token and clean EOF finalizes", func(t *testing.T) {
+		sseBody := strings.Join([]string{
+			`data: {"id":"chatcmpl-2","model":"claude-sonnet-5","choices":[],"usage":{"prompt_tokens":7,"completion_tokens":0,"total_tokens":7}}`,
+			"",
+		}, "\n")
+		resp := &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       copilotStringReadCloser(sseBody),
+		}
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+
+		result, err := svc.handleMessagesStreamingResponse(c, resp, "claude-sonnet-5", time.Now())
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if result.FirstTokenMs != nil {
+			t.Fatalf("FirstTokenMs = %d, want nil for usage-only stream", *result.FirstTokenMs)
+		}
+		if result.Usage == nil || result.Usage.PromptTokens != 7 {
+			t.Fatalf("unexpected usage: %#v", result.Usage)
+		}
+		if strings.Count(w.Body.String(), "event: message_stop") != 1 {
+			t.Fatalf("clean EOF should finalize exactly once:\n%s", w.Body.String())
+		}
+	})
+
+	t.Run("scanner error does not synthesize terminal events", func(t *testing.T) {
+		resp := &http.Response{
+			StatusCode: http.StatusOK,
+			Body: &copilotFailingReadCloser{data: []byte(
+				"data: " +
+					`{"id":"chatcmpl-3","model":"claude-sonnet-5","choices":[{"index":0,"delta":{"content":"partial"},"finish_reason":null}]}` +
+					"\n\n",
+			)},
+		}
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+
+		result, err := svc.handleMessagesStreamingResponse(c, resp, "claude-sonnet-5", time.Now())
+		if err == nil {
+			t.Fatal("expected scanner error")
+		}
+		if result == nil || result.FirstTokenMs == nil {
+			t.Fatalf("partial stream result should preserve TTFT: %#v", result)
+		}
+		if strings.Contains(w.Body.String(), "event: message_stop") ||
+			strings.Contains(w.Body.String(), "event: message_delta") {
+			t.Fatalf("truncated stream must not be finalized:\n%s", w.Body.String())
 		}
 	})
 }
@@ -947,6 +1069,21 @@ type copilotTestReadCloser struct {
 
 func (rc *copilotTestReadCloser) Read(p []byte) (int, error) { return rc.Reader.Read(p) }
 func (rc *copilotTestReadCloser) Close() error               { return nil }
+
+type copilotFailingReadCloser struct {
+	data []byte
+}
+
+func (rc *copilotFailingReadCloser) Read(p []byte) (int, error) {
+	if len(rc.data) == 0 {
+		return 0, errors.New("forced stream read failure")
+	}
+	n := copy(p, rc.data)
+	rc.data = rc.data[n:]
+	return n, nil
+}
+
+func (rc *copilotFailingReadCloser) Close() error { return nil }
 
 // newCopilotTestToken returns a copilot.CopilotToken that won't expire during tests.
 func newCopilotTestToken(token string) copilot.CopilotToken {

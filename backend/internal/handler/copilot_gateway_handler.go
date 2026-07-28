@@ -203,11 +203,20 @@ func (h *CopilotGatewayHandler) ChatCompletions(c *gin.Context) {
 		accountReleaseFunc = wrapReleaseOnDone(ctx, accountReleaseFunc)
 
 		// Forward request to Copilot API
+		writerSizeBeforeForward := c.Writer.Size()
 		result, fwdErr := h.copilotGatewayService.ForwardChatCompletions(ctx, c, account, body)
 		syncCopilotBillingGuardFromFailover(account, fwdErr)
 		if fwdErr != nil {
 			if accountReleaseFunc != nil {
 				accountReleaseFunc()
+			}
+			// A partial streaming response cannot be rolled back. Never append
+			// another account's stream (or a JSON error) to bytes already sent.
+			if c.Writer.Size() != writerSizeBeforeForward {
+				reqLog.Warn("copilot.stream_failed_after_response_started",
+					zap.Int64("account_id", account.ID),
+					zap.Error(fwdErr))
+				return
 			}
 			failedAccountIDs[account.ID] = struct{}{}
 			switchCount++
@@ -246,8 +255,9 @@ func (h *CopilotGatewayHandler) ChatCompletions(c *gin.Context) {
 			quotaPlatform := service.QuotaPlatform(c.Request.Context(), apiKey)
 			h.submitUsageRecordTask(c.Request.Context(), func(recordCtx context.Context) {
 				fwdResult := &service.ForwardResult{
-					Model:  capturedResult.Model,
-					Stream: reqStream,
+					Model:        capturedResult.Model,
+					Stream:       reqStream,
+					FirstTokenMs: capturedResult.FirstTokenMs,
 					Usage: service.ClaudeUsage{
 						InputTokens:  capturedResult.Usage.PromptTokens,
 						OutputTokens: capturedResult.Usage.CompletionTokens,
@@ -487,11 +497,20 @@ func (h *CopilotGatewayHandler) Messages(c *gin.Context) {
 		accountReleaseFunc = wrapReleaseOnDone(ctx, accountReleaseFunc)
 
 		// Forward request, translating Anthropic ↔ Copilot.
+		writerSizeBeforeForward := c.Writer.Size()
 		result, fwdErr := h.copilotGatewayService.ForwardMessages(ctx, c, account, body)
 		syncCopilotBillingGuardFromFailover(account, fwdErr)
 		if fwdErr != nil {
 			if accountReleaseFunc != nil {
 				accountReleaseFunc()
+			}
+			// A partial streaming response cannot be rolled back. Never append
+			// another account's stream (or an SSE error) to bytes already sent.
+			if c.Writer.Size() != writerSizeBeforeForward {
+				reqLog.Warn("copilot.messages.stream_failed_after_response_started",
+					zap.Int64("account_id", account.ID),
+					zap.Error(fwdErr))
+				return
 			}
 			failedAccountIDs[account.ID] = struct{}{}
 			switchCount++
@@ -529,8 +548,9 @@ func (h *CopilotGatewayHandler) Messages(c *gin.Context) {
 			quotaPlatform := service.QuotaPlatform(c.Request.Context(), apiKey)
 			h.submitUsageRecordTask(c.Request.Context(), func(recordCtx context.Context) {
 				fwdResult := &service.ForwardResult{
-					Model:  capturedResult.Model,
-					Stream: reqStream,
+					Model:        capturedResult.Model,
+					Stream:       reqStream,
+					FirstTokenMs: capturedResult.FirstTokenMs,
 					Usage: service.ClaudeUsage{
 						InputTokens:  capturedResult.Usage.PromptTokens,
 						OutputTokens: capturedResult.Usage.CompletionTokens,

@@ -1236,6 +1236,10 @@ func (s *AccountTestService) testCopilotAccountConnection(c *gin.Context, accoun
 	// Step 1: Exchange token (validates GitHub token + Copilot subscription)
 	s.sendEvent(c, TestEvent{Type: "content", Text: "Exchanging GitHub token for Copilot API token...\n"})
 
+	if s.copilotTokenProvider == nil {
+		return s.sendErrorAndEnd(c, "Copilot token provider is not configured")
+	}
+
 	copilotToken, err := s.copilotTokenProvider.GetAccessToken(ctx, account)
 	if err != nil {
 		return s.sendErrorAndEnd(c, fmt.Sprintf("Token exchange failed: %s", err.Error()))

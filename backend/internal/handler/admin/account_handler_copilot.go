@@ -2,7 +2,9 @@ package admin
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -24,6 +26,20 @@ type ValidateCopilotBillingPATRequest struct {
 	Username string `json:"username" binding:"required"`
 	Token    string `json:"token" binding:"required"`
 }
+
+type PollCopilotDeviceAuthorizationRequest struct {
+	FlowID string `json:"flow_id" binding:"required"`
+}
+
+type copilotDeviceAuthorizationSession struct {
+	mu         sync.Mutex
+	deviceCode string
+	interval   time.Duration
+	expiresAt  time.Time
+	nextPollAt time.Time
+}
+
+var copilotDeviceAuthorizationSessions sync.Map
 
 type githubBillingUsageResponse struct {
 	TimePeriod map[string]any           `json:"timePeriod,omitempty"`
@@ -62,6 +78,131 @@ type copilotBillingUsageCacheEntry struct {
 }
 
 var copilotBillingUsageCache sync.Map
+
+// StartCopilotDeviceAuthorization starts GitHub's device authorization flow.
+// The device code is retained server-side; the browser only receives an opaque
+// flow ID, the user code, and the GitHub verification URL.
+func (h *AccountHandler) StartCopilotDeviceAuthorization(c *gin.Context) {
+	device, err := copilot.RequestDeviceCode(&http.Client{Timeout: 15 * time.Second})
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	if device.DeviceCode == "" || device.UserCode == "" || device.VerificationURI == "" {
+		response.Error(c, http.StatusBadGateway, "GitHub returned an incomplete device authorization response")
+		return
+	}
+
+	flowBytes := make([]byte, 24)
+	if _, err := rand.Read(flowBytes); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	flowID := hex.EncodeToString(flowBytes)
+	intervalSeconds := max(device.Interval, 5)
+	expiresInSeconds := max(device.ExpiresIn, 1)
+	now := time.Now()
+	copilotDeviceAuthorizationSessions.Store(flowID, &copilotDeviceAuthorizationSession{
+		deviceCode: device.DeviceCode,
+		interval:   time.Duration(intervalSeconds) * time.Second,
+		expiresAt:  now.Add(time.Duration(expiresInSeconds) * time.Second),
+		nextPollAt: now,
+	})
+
+	response.Success(c, gin.H{
+		"flow_id":          flowID,
+		"user_code":        device.UserCode,
+		"verification_uri": device.VerificationURI,
+		"expires_in":       expiresInSeconds,
+		"interval":         intervalSeconds,
+	})
+}
+
+// PollCopilotDeviceAuthorization polls an existing server-side GitHub device
+// authorization flow. The final token is returned once and the flow is removed.
+func (h *AccountHandler) PollCopilotDeviceAuthorization(c *gin.Context) {
+	var req PollCopilotDeviceAuthorizationRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+	flowID := strings.TrimSpace(req.FlowID)
+	if len(flowID) != 48 {
+		response.BadRequest(c, "Invalid Copilot authorization flow")
+		return
+	}
+
+	value, ok := copilotDeviceAuthorizationSessions.Load(flowID)
+	if !ok {
+		response.Error(c, http.StatusGone, "Copilot authorization flow expired or was already completed")
+		return
+	}
+	session, ok := value.(*copilotDeviceAuthorizationSession)
+	if !ok || session == nil {
+		copilotDeviceAuthorizationSessions.Delete(flowID)
+		response.Error(c, http.StatusGone, "Copilot authorization flow is unavailable")
+		return
+	}
+
+	session.mu.Lock()
+	defer session.mu.Unlock()
+
+	now := time.Now()
+	if !now.Before(session.expiresAt) {
+		copilotDeviceAuthorizationSessions.Delete(flowID)
+		response.Error(c, http.StatusGone, "Copilot authorization code expired")
+		return
+	}
+	if now.Before(session.nextPollAt) {
+		retryAfter := max(int(time.Until(session.nextPollAt).Seconds())+1, 1)
+		response.Success(c, gin.H{"status": "pending", "retry_after": retryAfter})
+		return
+	}
+	session.nextPollAt = now.Add(session.interval)
+
+	tokenResult, err := copilot.PollAccessToken(&http.Client{Timeout: 15 * time.Second}, session.deviceCode)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	if tokenResult.AccessToken != "" {
+		copilotDeviceAuthorizationSessions.Delete(flowID)
+		username := ""
+		if user, userErr := copilot.GetGitHubUser(&http.Client{Timeout: 15 * time.Second}, tokenResult.AccessToken); userErr == nil {
+			username = user.Login
+		}
+		response.Success(c, gin.H{
+			"status":       "authorized",
+			"access_token": tokenResult.AccessToken,
+			"token_type":   tokenResult.TokenType,
+			"scope":        tokenResult.Scope,
+			"username":     username,
+		})
+		return
+	}
+
+	switch tokenResult.Error {
+	case "authorization_pending", "":
+		response.Success(c, gin.H{"status": "pending", "retry_after": int(session.interval.Seconds())})
+	case "slow_down":
+		session.interval += 5 * time.Second
+		session.nextPollAt = now.Add(session.interval)
+		response.Success(c, gin.H{"status": "pending", "retry_after": int(session.interval.Seconds())})
+	case "expired_token":
+		copilotDeviceAuthorizationSessions.Delete(flowID)
+		response.Error(c, http.StatusGone, "Copilot authorization code expired")
+	case "access_denied":
+		copilotDeviceAuthorizationSessions.Delete(flowID)
+		response.Error(c, http.StatusForbidden, "GitHub authorization was denied")
+	default:
+		copilotDeviceAuthorizationSessions.Delete(flowID)
+		message := strings.TrimSpace(tokenResult.ErrorDesc)
+		if message == "" {
+			message = "GitHub device authorization failed"
+		}
+		response.BadRequest(c, message)
+	}
+}
 
 // ValidateCopilotBillingPAT checks whether a fine-grained GitHub PAT can read
 // the configured user's Copilot billing usage.

@@ -15,6 +15,7 @@ func copilotMessagesForwardResult(result *service.CopilotForwardResult, stream b
 		UpstreamModel: result.Model,
 		Stream:        stream,
 		Duration:      duration,
+		FirstTokenMs:  result.FirstTokenMs,
 	}
 	if result.Usage != nil {
 		out.Usage = service.ClaudeUsage{
@@ -34,6 +35,7 @@ func copilotChatForwardResult(result *service.CopilotForwardResult, stream bool,
 		UpstreamModel: result.Model,
 		Stream:        stream,
 		Duration:      duration,
+		FirstTokenMs:  result.FirstTokenMs,
 	}
 	if result.Usage != nil {
 		out.Usage = service.OpenAIUsage{

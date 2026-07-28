@@ -136,6 +136,33 @@ func TestOpenAISelectAccountWithLoadAwareness_HydratesSelectedAccountFromSchedul
 	}
 }
 
+func TestSchedulerSnapshot_OpenAIMixedIncludesCopilot(t *testing.T) {
+	repo := &mockAccountRepoForPlatform{
+		accounts: []Account{
+			{ID: 1, Platform: PlatformOpenAI, Status: StatusActive, Schedulable: true},
+			{ID: 2, Platform: PlatformCopilot, Status: StatusActive, Schedulable: true},
+		},
+	}
+	svc := NewSchedulerSnapshotService(nil, nil, repo, nil, &config.Config{
+		RunMode: config.RunModeStandard,
+		Gateway: config.GatewayConfig{Scheduling: config.GatewaySchedulingConfig{
+			DbFallbackEnabled: true,
+		}},
+	})
+
+	accounts, useMixed, err := svc.ListSchedulableAccounts(context.Background(), nil, PlatformOpenAI, false)
+
+	if err != nil {
+		t.Fatalf("ListSchedulableAccounts error: %v", err)
+	}
+	if !useMixed {
+		t.Fatalf("expected OpenAI snapshot scheduling to use the mixed bucket")
+	}
+	if len(accounts) != 2 || accounts[0].ID != 1 || accounts[1].ID != 2 {
+		t.Fatalf("expected OpenAI and Copilot accounts, got %#v", accounts)
+	}
+}
+
 func TestOpenAINewAcquiredSelectionResult_ReleasesSlotWhenHydrationFails(t *testing.T) {
 	cache := &snapshotHydrationCache{
 		accounts: map[int64]*Account{},
@@ -149,6 +176,36 @@ func TestOpenAINewAcquiredSelectionResult_ReleasesSlotWhenHydrationFails(t *test
 	selection, err := svc.newAcquiredSelectionResult(context.Background(), &Account{ID: 1001}, func() {
 		releaseCalls++
 	})
+
+	if err == nil {
+		t.Fatalf("expected hydration error")
+	}
+	if selection != nil {
+		t.Fatalf("expected nil selection on hydration error")
+	}
+	if releaseCalls != 1 {
+		t.Fatalf("expected release to be called once, got %d", releaseCalls)
+	}
+}
+
+func TestGatewayNewAcquiredSelectionResult_ReleasesSlotWhenHydrationFails(t *testing.T) {
+	cache := &snapshotHydrationCache{
+		accounts: map[int64]*Account{},
+	}
+	schedulerSnapshot := NewSchedulerSnapshotService(cache, nil, stubOpenAIAccountRepo{}, nil, nil)
+	svc := &GatewayService{
+		schedulerSnapshot: schedulerSnapshot,
+	}
+	releaseCalls := 0
+
+	selection, err := svc.newSelectionResultWithStickyPolicy(
+		context.Background(),
+		&Account{ID: 1002},
+		true,
+		func() { releaseCalls++ },
+		nil,
+		true,
+	)
 
 	if err == nil {
 		t.Fatalf("expected hydration error")

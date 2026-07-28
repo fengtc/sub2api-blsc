@@ -37,6 +37,34 @@ const gatewayCompatibilityMetricsLogInterval = 1024
 
 var gatewayCompatibilityMetricsLogCounter atomic.Uint64
 
+func shouldBindStickyAfterWait(selection *service.AccountSelectionResult) bool {
+	return selection != nil && !selection.PreserveStickyBinding
+}
+
+func shouldRetryCopilotOverflowWaitQueueFull(account *service.Account, selection *service.AccountSelectionResult) bool {
+	if account == nil {
+		return false
+	}
+	return account.Platform == service.PlatformCopilot ||
+		(selection != nil && selection.PreserveStickyBinding)
+}
+
+func recordCopilotWaitQueueFull(state *FailoverState, accountID int64) {
+	if state == nil {
+		return
+	}
+	if state.FailedAccountIDs == nil {
+		state.FailedAccountIDs = make(map[int64]struct{})
+	}
+	state.FailedAccountIDs[accountID] = struct{}{}
+	state.LastFailoverErr = &service.UpstreamFailoverError{
+		StatusCode:        http.StatusTooManyRequests,
+		NextAccountAction: service.NextAccountStop,
+		ClientStatusCode:  http.StatusTooManyRequests,
+		ClientMessage:     "Too many pending requests, please retry later",
+	}
+}
+
 // GatewayHandler handles API gateway requests
 type GatewayHandler struct {
 	gatewayService            *service.GatewayService
@@ -401,6 +429,18 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 						zap.Int64("account_id", account.ID),
 						zap.Int("max_waiting", selection.WaitPlan.MaxWaiting),
 					)
+					// Selection and wait-count increment are separate Redis
+					// operations. If a Copilot sticky queue fills between them,
+					// retry account selection instead of rejecting while other
+					// Copilot accounts still have capacity.
+					if shouldRetryCopilotOverflowWaitQueueFull(account, selection) {
+						recordCopilotWaitQueueFull(fs, account.ID)
+						if selection.PreserveStickyBinding {
+							ctx := service.WithPreserveCopilotStickyBinding(c.Request.Context())
+							c.Request = c.Request.WithContext(ctx)
+						}
+						continue
+					}
 					h.handleStreamingAwareError(c, http.StatusTooManyRequests, "rate_limit_error", "Too many pending requests, please retry later", streamStarted)
 					return
 				}
@@ -430,8 +470,10 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				}
 				// Slot acquired: no longer waiting in queue.
 				releaseWait()
-				if err := h.gatewayService.BindStickySession(c.Request.Context(), apiKey.GroupID, sessionKey, account.ID); err != nil {
-					reqLog.Warn("gateway.bind_sticky_session_failed", zap.Int64("account_id", account.ID), zap.Error(err))
+				if shouldBindStickyAfterWait(selection) {
+					if err := h.gatewayService.BindStickySession(c.Request.Context(), apiKey.GroupID, sessionKey, account.ID); err != nil {
+						reqLog.Warn("gateway.bind_sticky_session_failed", zap.Int64("account_id", account.ID), zap.Error(err))
+					}
 				}
 			}
 			// 账号槽位/等待计数需要在超时或断开时安全回收
@@ -712,6 +754,18 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 						zap.Int64("account_id", account.ID),
 						zap.Int("max_waiting", selection.WaitPlan.MaxWaiting),
 					)
+					// Selection and wait-count increment are separate Redis
+					// operations. If a Copilot sticky queue fills between them,
+					// retry account selection instead of rejecting while other
+					// Copilot accounts still have capacity.
+					if shouldRetryCopilotOverflowWaitQueueFull(account, selection) {
+						recordCopilotWaitQueueFull(fs, account.ID)
+						if selection.PreserveStickyBinding {
+							ctx := service.WithPreserveCopilotStickyBinding(c.Request.Context())
+							c.Request = c.Request.WithContext(ctx)
+						}
+						continue
+					}
 					h.handleStreamingAwareError(c, http.StatusTooManyRequests, "rate_limit_error", "Too many pending requests, please retry later", streamStarted)
 					return
 				}
@@ -741,12 +795,19 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				}
 				// Slot acquired: no longer waiting in queue.
 				releaseWait()
-				reqLog.Info("sticky.bind_after_wait",
-					zap.String("session_key", sessionKey),
-					zap.Int64("account_id", account.ID),
-				)
-				if err := h.gatewayService.BindStickySession(c.Request.Context(), currentAPIKey.GroupID, sessionKey, account.ID); err != nil {
-					reqLog.Warn("gateway.bind_sticky_session_failed", zap.Int64("account_id", account.ID), zap.Error(err))
+				if shouldBindStickyAfterWait(selection) {
+					reqLog.Info("sticky.bind_after_wait",
+						zap.String("session_key", sessionKey),
+						zap.Int64("account_id", account.ID),
+					)
+					if err := h.gatewayService.BindStickySession(c.Request.Context(), currentAPIKey.GroupID, sessionKey, account.ID); err != nil {
+						reqLog.Warn("gateway.bind_sticky_session_failed", zap.Int64("account_id", account.ID), zap.Error(err))
+					}
+				} else {
+					reqLog.Debug("sticky.preserve_after_overflow_wait",
+						zap.String("session_key", sessionKey),
+						zap.Int64("overflow_account_id", account.ID),
+					)
 				}
 			}
 			// 账号槽位/等待计数需要在超时或断开时安全回收

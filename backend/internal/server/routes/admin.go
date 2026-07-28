@@ -355,6 +355,8 @@ func registerAccountRoutes(admin *gin.RouterGroup, h *handler.Handlers, stepUpAu
 		accounts.POST("", h.Admin.Account.Create)
 		accounts.POST("/:id/duplicate", h.Admin.Account.Duplicate)
 		accounts.POST("/check-mixed-channel", h.Admin.Account.CheckMixedChannel)
+		accounts.POST("/copilot-device/start", h.Admin.Account.StartCopilotDeviceAuthorization)
+		accounts.POST("/copilot-device/poll", h.Admin.Account.PollCopilotDeviceAuthorization)
 		accounts.POST("/copilot-billing-pat/validate", h.Admin.Account.ValidateCopilotBillingPAT)
 		accounts.POST("/import/codex-session", h.Admin.Account.ImportCodexSession)
 		accounts.POST("/sync/crs", h.Admin.Account.SyncFromCRS)

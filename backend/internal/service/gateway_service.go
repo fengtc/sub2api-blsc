@@ -533,10 +533,11 @@ type AccountWaitPlan struct {
 }
 
 type AccountSelectionResult struct {
-	Account     *Account
-	Acquired    bool
-	ReleaseFunc func()
-	WaitPlan    *AccountWaitPlan // nil means no wait allowed
+	Account               *Account
+	Acquired              bool
+	ReleaseFunc           func()
+	WaitPlan              *AccountWaitPlan // nil means no wait allowed
+	PreserveStickyBinding bool             // overflow serves only this request and must not migrate the existing session binding
 }
 
 // ClaudeUsage 表示Claude API返回的usage信息

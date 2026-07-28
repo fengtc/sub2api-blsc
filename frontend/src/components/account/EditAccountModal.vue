@@ -80,6 +80,11 @@
             "
           />
           <p class="input-hint">{{ t('admin.accounts.leaveEmptyToKeep') }}</p>
+          <CopilotDeviceAuthorization
+            v-if="account.platform === 'copilot'"
+            class="mt-3"
+            @authorized="handleCopilotDeviceAuthorized"
+          />
         </div>
 
         <div v-if="account.platform === 'copilot'" class="space-y-3 rounded-lg border border-gray-200 p-3 dark:border-dark-600">
@@ -96,11 +101,11 @@
           </div>
           <div>
             <label class="input-label">Billing PAT</label>
-            <div class="flex gap-2">
+            <div class="flex flex-wrap gap-2 sm:flex-nowrap">
               <input
                 v-model="editCopilotBillingPAT"
                 type="password"
-                class="input font-mono"
+                class="input min-w-0 flex-1 font-mono"
                 placeholder="留空则保留已有 PAT"
                 autocomplete="new-password"
                 data-1p-ignore
@@ -115,9 +120,18 @@
               >
                 {{ copilotBillingValidating ? '验证中' : '验证' }}
               </button>
+              <a
+                :href="editCopilotBillingPATCreationURL"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="btn btn-secondary shrink-0"
+                data-testid="edit-copilot-billing-pat"
+              >
+                创建 Billing PAT
+              </a>
             </div>
             <p class="input-hint">
-              需要 GitHub fine-grained PAT：Account permissions -> Plan -> Read-only。
+              GitHub 页面已预填 Plan: Read。生成后复制到此处并点击验证。
               <span v-if="account.credentials_status?.has_billing_pat">已配置，留空保留。</span>
             </p>
           </div>
@@ -2712,6 +2726,7 @@ import GroupSelector from '@/components/common/GroupSelector.vue'
 import ModelWhitelistSelector from '@/components/account/ModelWhitelistSelector.vue'
 import QuotaLimitCard from '@/components/account/QuotaLimitCard.vue'
 import GrokBaseUrlPresets from '@/components/account/GrokBaseUrlPresets.vue'
+import CopilotDeviceAuthorization from '@/components/account/CopilotDeviceAuthorization.vue'
 import HeaderOverrideEditor from '@/components/account/HeaderOverrideEditor.vue'
 import OllamaCloudUsageSettings from '@/components/account/OllamaCloudUsageSettings.vue'
 import {
@@ -2731,7 +2746,7 @@ import {
 } from '@/components/account/credentialsBuilder'
 import { formatDateTime, formatDateTimeLocalInput, parseDateTimeLocalInput } from '@/utils/format'
 import { createStableObjectKeyResolver } from '@/utils/stableObjectKey'
-import { VERTEX_LOCATION_OPTIONS } from '@/constants/account'
+import { buildCopilotBillingPATCreationURL, VERTEX_LOCATION_OPTIONS } from '@/constants/account'
 import {
   OPENAI_WS_MODE_CTX_POOL,
   OPENAI_WS_MODE_OFF,
@@ -2813,6 +2828,9 @@ const copilotBillingValidationMessage = ref('')
 const editCopilotBillingCreditLimit = ref<number | null>(20000)
 const editCopilotBillingSafetyMargin = ref<number | null>(200)
 const editCopilotBillingAutoPauseDisabled = ref(false)
+const editCopilotBillingPATCreationURL = computed(() =>
+  buildCopilotBillingPATCreationURL(editCopilotBillingUsername.value)
+)
 // Bedrock credentials
 const editBedrockAccessKeyId = ref('')
 const editBedrockSecretAccessKey = ref('')
@@ -2861,6 +2879,14 @@ const validateCopilotBillingPAT = async () => {
   } finally {
     copilotBillingValidating.value = false
   }
+}
+
+const handleCopilotDeviceAuthorized = (payload: { token: string; username: string }) => {
+  editApiKey.value = payload.token
+  if (payload.username && !editCopilotBillingUsername.value.trim()) {
+    editCopilotBillingUsername.value = payload.username
+  }
+  appStore.showSuccess('GitHub 授权成功，新的 Copilot Token 已填入；保存后生效')
 }
 
 function parsePoolModeRetryStatusCodes(input: string): number[] {

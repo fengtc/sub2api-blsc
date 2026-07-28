@@ -229,6 +229,40 @@ export async function validateCopilotBillingPAT(params: {
   return data
 }
 
+export interface CopilotDeviceAuthorizationStart {
+  flow_id: string
+  user_code: string
+  verification_uri: string
+  expires_in: number
+  interval: number
+}
+
+export interface CopilotDeviceAuthorizationPoll {
+  status: 'pending' | 'authorized'
+  retry_after?: number
+  access_token?: string
+  token_type?: string
+  scope?: string
+  username?: string
+}
+
+export async function startCopilotDeviceAuthorization(): Promise<CopilotDeviceAuthorizationStart> {
+  const { data } = await apiClient.post<CopilotDeviceAuthorizationStart>(
+    '/admin/accounts/copilot-device/start'
+  )
+  return data
+}
+
+export async function pollCopilotDeviceAuthorization(
+  flowId: string
+): Promise<CopilotDeviceAuthorizationPoll> {
+  const { data } = await apiClient.post<CopilotDeviceAuthorizationPoll>(
+    '/admin/accounts/copilot-device/poll',
+    { flow_id: flowId }
+  )
+  return data
+}
+
 /**
  * Delete account
  * @param id - Account ID
@@ -963,6 +997,8 @@ export const accountsAPI = {
   duplicate,
   update,
   checkMixedChannelRisk,
+  startCopilotDeviceAuthorization,
+  pollCopilotDeviceAuthorization,
   validateCopilotBillingPAT,
   delete: deleteAccount,
   toggleStatus,
