@@ -100,10 +100,11 @@ func (s *CopilotGatewayService) resolveBaseURL(account *Account) (string, error)
 
 // CopilotForwardResult holds the result of a Copilot API request.
 type CopilotForwardResult struct {
-	StatusCode   int
-	Model        string
-	Usage        *CopilotUsage
-	FirstTokenMs *int
+	StatusCode       int
+	Model            string
+	Usage            *CopilotUsage
+	FirstTokenMs     *int
+	UpstreamEndpoint string
 }
 
 // CopilotUsage tracks token usage from a Copilot API response.
@@ -269,10 +270,11 @@ func (s *CopilotGatewayService) handleStreamingResponse(
 	}
 
 	return &CopilotForwardResult{
-		StatusCode:   http.StatusOK,
-		Model:        model,
-		Usage:        usage,
-		FirstTokenMs: firstTokenMs,
+		StatusCode:       http.StatusOK,
+		Model:            model,
+		Usage:            usage,
+		FirstTokenMs:     firstTokenMs,
+		UpstreamEndpoint: "/chat/completions",
 	}, nil
 }
 
@@ -301,9 +303,10 @@ func (s *CopilotGatewayService) handleNonStreamingResponse(
 	c.Data(http.StatusOK, "application/json", body)
 
 	return &CopilotForwardResult{
-		StatusCode: http.StatusOK,
-		Model:      model,
-		Usage:      usage,
+		StatusCode:       http.StatusOK,
+		Model:            model,
+		Usage:            usage,
+		UpstreamEndpoint: "/chat/completions",
 	}, nil
 }
 
@@ -665,18 +668,22 @@ func (s *CopilotGatewayService) handleMessagesNonStreamingResponse(
 	// Translate OpenAI response → Anthropic format.
 	anthropicBody, err := translateOpenAIToAnthropic(body)
 	if err != nil {
-		slog.Warn("copilot messages: failed to translate response, forwarding raw",
+		slog.Warn("copilot messages: failed to translate response",
 			"error", err, "model", model)
-		// Fall back to raw body so the client gets something.
-		c.Data(http.StatusOK, "application/json", body)
-		return &CopilotForwardResult{StatusCode: http.StatusOK, Model: model, Usage: usage}, nil
+		return &CopilotForwardResult{
+			StatusCode:       http.StatusOK,
+			Model:            model,
+			Usage:            usage,
+			UpstreamEndpoint: "/chat/completions",
+		}, fmt.Errorf("copilot messages: invalid chat completions response: %w", err)
 	}
 
 	c.Data(http.StatusOK, "application/json", anthropicBody)
 	return &CopilotForwardResult{
-		StatusCode: http.StatusOK,
-		Model:      model,
-		Usage:      usage,
+		StatusCode:       http.StatusOK,
+		Model:            model,
+		Usage:            usage,
+		UpstreamEndpoint: "/chat/completions",
 	}, nil
 }
 
@@ -780,10 +787,11 @@ func (s *CopilotGatewayService) handleMessagesStreamingResponse(
 	if err := scanner.Err(); err != nil {
 		slog.Warn("copilot messages stream scanner error", "error", err)
 		return &CopilotForwardResult{
-			StatusCode:   http.StatusOK,
-			Model:        model,
-			Usage:        usage,
-			FirstTokenMs: firstTokenMs,
+			StatusCode:       http.StatusOK,
+			Model:            model,
+			Usage:            usage,
+			FirstTokenMs:     firstTokenMs,
+			UpstreamEndpoint: "/chat/completions",
 		}, fmt.Errorf("copilot messages: stream usage incomplete: %w", err)
 	}
 
@@ -793,10 +801,11 @@ func (s *CopilotGatewayService) handleMessagesStreamingResponse(
 	}
 
 	return &CopilotForwardResult{
-		StatusCode:   http.StatusOK,
-		Model:        model,
-		Usage:        usage,
-		FirstTokenMs: firstTokenMs,
+		StatusCode:       http.StatusOK,
+		Model:            model,
+		Usage:            usage,
+		FirstTokenMs:     firstTokenMs,
+		UpstreamEndpoint: "/chat/completions",
 	}, nil
 }
 

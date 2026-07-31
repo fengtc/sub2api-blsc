@@ -252,6 +252,7 @@ func (h *CopilotGatewayHandler) ChatCompletions(c *gin.Context) {
 			clientIP := ip.GetClientIP(c)
 			capturedResult := result
 			capturedAccount := account
+			capturedUpstreamEndpoint := copilotUpstreamEndpoint(result)
 			quotaPlatform := service.QuotaPlatform(c.Request.Context(), apiKey)
 			h.submitUsageRecordTask(c.Request.Context(), func(recordCtx context.Context) {
 				fwdResult := &service.ForwardResult{
@@ -267,7 +268,7 @@ func (h *CopilotGatewayHandler) ChatCompletions(c *gin.Context) {
 					Account:          capturedAccount,
 					Subscription:     subscription,
 					InboundEndpoint:  "/copilot/v1/chat/completions",
-					UpstreamEndpoint: "/chat/completions",
+					UpstreamEndpoint: capturedUpstreamEndpoint,
 					UserAgent:        userAgent,
 					IPAddress:        clientIP,
 					APIKeyService:    nil,
@@ -542,6 +543,7 @@ func (h *CopilotGatewayHandler) Messages(c *gin.Context) {
 			clientIP := ip.GetClientIP(c)
 			capturedResult := result
 			capturedAccount := account
+			capturedUpstreamEndpoint := copilotUpstreamEndpoint(result)
 			quotaPlatform := service.QuotaPlatform(c.Request.Context(), apiKey)
 			h.submitUsageRecordTask(c.Request.Context(), func(recordCtx context.Context) {
 				fwdResult := &service.ForwardResult{
@@ -557,7 +559,7 @@ func (h *CopilotGatewayHandler) Messages(c *gin.Context) {
 					Account:          capturedAccount,
 					Subscription:     subscription,
 					InboundEndpoint:  "/copilot/v1/messages",
-					UpstreamEndpoint: "/chat/completions",
+					UpstreamEndpoint: capturedUpstreamEndpoint,
 					UserAgent:        userAgent,
 					IPAddress:        clientIP,
 					APIKeyService:    nil,

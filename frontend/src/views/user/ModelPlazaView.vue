@@ -13,13 +13,13 @@
               <input
                 v-model="searchQuery"
                 type="text"
-                :placeholder="t('modelPlaza.searchPlaceholder')"
+                :placeholder="t('modelCatalog.searchPlaceholder')"
                 class="input pl-10"
               />
             </div>
 
             <select v-model="providerFilter" class="input w-full sm:w-48">
-              <option value="">{{ t('modelPlaza.allProviders') }}</option>
+              <option value="">{{ t('modelCatalog.allProviders') }}</option>
               <option v-for="provider in providers" :key="provider" :value="provider">
                 {{ provider }}
               </option>
@@ -27,7 +27,7 @@
           </div>
 
           <div class="text-sm text-gray-500 dark:text-dark-400">
-            {{ t('modelPlaza.modelCount', { count: filteredModels.length }) }}
+            {{ t('modelCatalog.modelCount', { count: filteredModels.length }) }}
           </div>
         </div>
       </template>
@@ -37,10 +37,10 @@
           <table>
             <thead>
               <tr>
-                <th>{{ t('modelPlaza.columns.model') }}</th>
-                <th>{{ t('modelPlaza.columns.provider') }}</th>
-                <th>{{ t('modelPlaza.columns.endpoint') }}</th>
-                <th>{{ t('modelPlaza.columns.upstream') }}</th>
+                <th>{{ t('modelCatalog.columns.model') }}</th>
+                <th>{{ t('modelCatalog.columns.provider') }}</th>
+                <th>{{ t('modelCatalog.columns.endpoint') }}</th>
+                <th>{{ t('modelCatalog.columns.upstream') }}</th>
                 <th class="text-right">{{ t('common.actions') }}</th>
               </tr>
             </thead>
@@ -63,7 +63,7 @@
                     <button
                       type="button"
                       class="btn btn-secondary btn-sm"
-                      :title="t('modelPlaza.copyModel')"
+                      :title="t('modelCatalog.copyModel')"
                       @click="copyModel(model.name)"
                     >
                       <Icon name="copy" size="sm" />
@@ -74,7 +74,7 @@
               </tr>
               <tr v-if="filteredModels.length === 0">
                 <td colspan="5" class="py-12 text-center text-gray-500 dark:text-dark-400">
-                  {{ t('modelPlaza.empty') }}
+                  {{ t('modelCatalog.empty') }}
                 </td>
               </tr>
             </tbody>
@@ -151,7 +151,7 @@ const filteredModels = computed(() => {
 })
 
 async function copyModel(modelName: string): Promise<void> {
-  await copyToClipboard(modelName, t('modelPlaza.copied'))
+  await copyToClipboard(modelName, t('modelCatalog.copied'))
 }
 </script>
 

@@ -799,6 +799,15 @@ func translateOpenAIToAnthropic(body []byte) ([]byte, error) {
 	if err := json.Unmarshal(body, &resp); err != nil {
 		return nil, fmt.Errorf("parse openai response: %w", err)
 	}
+	if strings.TrimSpace(resp.ID) == "" {
+		return nil, fmt.Errorf("parse openai response: missing completion id")
+	}
+	if strings.TrimSpace(resp.Model) == "" {
+		return nil, fmt.Errorf("parse openai response: missing model")
+	}
+	if len(resp.Choices) == 0 {
+		return nil, fmt.Errorf("parse openai response: missing choices")
+	}
 
 	var contentBlocks []json.RawMessage
 	var stopReason string

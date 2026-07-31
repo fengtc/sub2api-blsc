@@ -162,6 +162,9 @@ func TestCopilotGatewayService_ForwardMessagesUsesNativeEndpoint(t *testing.T) {
 	if result == nil || result.Usage == nil {
 		t.Fatalf("missing result usage: %#v", result)
 	}
+	if result.UpstreamEndpoint != "/v1/messages" {
+		t.Fatalf("upstream endpoint = %q, want /v1/messages", result.UpstreamEndpoint)
+	}
 	if result.Usage.PromptTokens != 100 ||
 		result.Usage.UncachedPromptTokens() != 50 ||
 		result.Usage.CompletionTokens != 7 ||
@@ -228,6 +231,9 @@ func TestCopilotGatewayService_ForwardMessagesStreamsNativeUsage(t *testing.T) {
 	if result == nil || result.Usage == nil {
 		t.Fatalf("missing result usage: %#v", result)
 	}
+	if result.UpstreamEndpoint != "/v1/messages" {
+		t.Fatalf("upstream endpoint = %q, want /v1/messages", result.UpstreamEndpoint)
+	}
 	if result.Usage.UncachedPromptTokens() != 50 ||
 		result.Usage.CompletionTokens != 7 ||
 		result.Usage.CacheCreationInputTokens != 20 ||
@@ -242,5 +248,226 @@ func TestCopilotGatewayService_ForwardMessagesStreamsNativeUsage(t *testing.T) {
 		!strings.Contains(bodyText, `"cache_creation_input_tokens":20`) ||
 		!strings.Contains(bodyText, "event: message_stop") {
 		t.Fatalf("native SSE was not passed through:\n%s", bodyText)
+	}
+}
+
+func TestShouldFallbackCopilotNativeMessagesStatus(t *testing.T) {
+	tests := []struct {
+		status int
+		want   bool
+	}{
+		{status: http.StatusBadRequest, want: true},
+		{status: http.StatusNotFound, want: true},
+		{status: http.StatusMethodNotAllowed, want: true},
+		{status: http.StatusUnsupportedMediaType, want: true},
+		{status: http.StatusUnprocessableEntity, want: true},
+		{status: http.StatusUnauthorized, want: false},
+		{status: http.StatusPaymentRequired, want: false},
+		{status: http.StatusForbidden, want: false},
+		{status: http.StatusTooManyRequests, want: false},
+		{status: http.StatusInternalServerError, want: false},
+	}
+
+	for _, tt := range tests {
+		if got := shouldFallbackCopilotNativeMessagesStatus(tt.status); got != tt.want {
+			t.Errorf("status %d fallback = %v, want %v", tt.status, got, tt.want)
+		}
+	}
+}
+
+func TestCopilotGatewayService_ForwardMessagesFallsBackFromNativeStatus(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	for _, status := range []int{
+		http.StatusBadRequest,
+		http.StatusNotFound,
+		http.StatusMethodNotAllowed,
+		http.StatusUnsupportedMediaType,
+		http.StatusUnprocessableEntity,
+	} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			var paths []string
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				paths = append(paths, r.URL.Path)
+				if r.URL.Path == "/v1/messages" {
+					w.WriteHeader(status)
+					fmt.Fprint(w, `{"error":{"message":"native unsupported"}}`)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				fmt.Fprint(w, `{"id":"chatcmpl-fallback","model":"claude-sonnet-5","choices":[{"index":0,"message":{"role":"assistant","content":"fallback ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":2,"total_tokens":5}}`)
+			}))
+			defer server.Close()
+
+			svc, account := newCopilotNativeMessagesTestService(1000+int64(status), server.URL)
+			body := []byte(`{"model":"claude-sonnet-5","messages":[{"role":"user","content":"hello"}],"max_tokens":64,"stream":false}`)
+			recorder := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(recorder)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+
+			result, err := svc.ForwardMessages(t.Context(), c, account, body)
+			if err != nil {
+				t.Fatalf("ForwardMessages error: %v", err)
+			}
+			if result == nil || result.UpstreamEndpoint != "/chat/completions" {
+				t.Fatalf("unexpected fallback result: %#v", result)
+			}
+			if got := strings.Join(paths, ","); got != "/v1/messages,/chat/completions" {
+				t.Fatalf("upstream paths = %q", got)
+			}
+			if !strings.Contains(recorder.Body.String(), `"type":"message"`) ||
+				strings.Contains(recorder.Body.String(), "native unsupported") {
+				t.Fatalf("unexpected downstream body: %s", recorder.Body.String())
+			}
+		})
+	}
+}
+
+func TestCopilotGatewayService_ForwardMessagesFallsBackFromInvalidNative200(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	tests := []struct {
+		name string
+		body string
+	}{
+		{name: "empty", body: ""},
+		{name: "invalid JSON", body: "not-json"},
+		{name: "wrong schema", body: `{}`},
+		{name: "missing usage", body: `{"id":"msg_native","type":"message","role":"assistant","content":[]}`},
+	}
+
+	for i, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var paths []string
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				paths = append(paths, r.URL.Path)
+				if r.URL.Path == "/v1/messages" {
+					w.Header().Set("Content-Type", "application/json")
+					fmt.Fprint(w, tt.body)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				fmt.Fprint(w, `{"id":"chatcmpl-fallback","model":"claude-sonnet-5","choices":[{"index":0,"message":{"role":"assistant","content":"fallback ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":2,"total_tokens":5}}`)
+			}))
+			defer server.Close()
+
+			svc, account := newCopilotNativeMessagesTestService(2000+int64(i), server.URL)
+			requestBody := []byte(`{"model":"claude-sonnet-5","messages":[{"role":"user","content":"hello"}],"max_tokens":64,"stream":false}`)
+			recorder := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(recorder)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+
+			result, err := svc.ForwardMessages(t.Context(), c, account, requestBody)
+			if err != nil {
+				t.Fatalf("ForwardMessages error: %v", err)
+			}
+			if result == nil || result.UpstreamEndpoint != "/chat/completions" {
+				t.Fatalf("unexpected fallback result: %#v", result)
+			}
+			if got := strings.Join(paths, ","); got != "/v1/messages,/chat/completions" {
+				t.Fatalf("upstream paths = %q", got)
+			}
+			if !strings.Contains(recorder.Body.String(), "fallback ok") {
+				t.Fatalf("fallback response missing: %s", recorder.Body.String())
+			}
+		})
+	}
+}
+
+func TestCopilotGatewayService_ForwardMessagesFallsBackFromNativeStreamBeforeStart(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	for i, nativeBody := range []string{
+		"",
+		"event: ping\ndata: {\"type\":\"ping\"}\n\n",
+	} {
+		t.Run(fmt.Sprintf("case_%d", i), func(t *testing.T) {
+			var paths []string
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				paths = append(paths, r.URL.Path)
+				w.Header().Set("Content-Type", "text/event-stream")
+				if r.URL.Path == "/v1/messages" {
+					fmt.Fprint(w, nativeBody)
+					return
+				}
+				fmt.Fprint(w, `data: {"id":"chatcmpl-fallback","object":"chat.completion.chunk","model":"claude-sonnet-5","choices":[{"index":0,"delta":{"role":"assistant","content":"fallback ok"},"finish_reason":"stop"}]}`+"\n\n")
+				fmt.Fprint(w, "data: [DONE]\n\n")
+			}))
+			defer server.Close()
+
+			svc, account := newCopilotNativeMessagesTestService(3000+int64(i), server.URL)
+			requestBody := []byte(`{"model":"claude-sonnet-5","messages":[{"role":"user","content":"hello"}],"max_tokens":64,"stream":true}`)
+			recorder := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(recorder)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+
+			result, err := svc.ForwardMessages(t.Context(), c, account, requestBody)
+			if err != nil {
+				t.Fatalf("ForwardMessages error: %v", err)
+			}
+			if result == nil || result.UpstreamEndpoint != "/chat/completions" {
+				t.Fatalf("unexpected fallback result: %#v", result)
+			}
+			if got := strings.Join(paths, ","); got != "/v1/messages,/chat/completions" {
+				t.Fatalf("upstream paths = %q", got)
+			}
+			if strings.Contains(recorder.Body.String(), `"type":"ping"`) ||
+				!strings.Contains(recorder.Body.String(), "fallback ok") {
+				t.Fatalf("unexpected downstream stream: %s", recorder.Body.String())
+			}
+		})
+	}
+}
+
+func TestCopilotGatewayService_ForwardMessagesDoesNotFallbackAfterNativeStreamStarts(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	var paths []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path)
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, "event: message_start\n")
+		fmt.Fprint(w, `data: {"type":"message_start","message":{"id":"msg_native","type":"message","role":"assistant","model":"claude-sonnet-5","content":[],"usage":{"input_tokens":3,"output_tokens":0}}}`+"\n\n")
+		fmt.Fprint(w, "event: content_block_delta\n")
+		fmt.Fprint(w, `data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"partial"}}`+"\n\n")
+	}))
+	defer server.Close()
+
+	svc, account := newCopilotNativeMessagesTestService(4001, server.URL)
+	requestBody := []byte(`{"model":"claude-sonnet-5","messages":[{"role":"user","content":"hello"}],"max_tokens":64,"stream":true}`)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+
+	result, err := svc.ForwardMessages(t.Context(), c, account, requestBody)
+	if err == nil || !strings.Contains(err.Error(), "missing message_stop") {
+		t.Fatalf("error = %v, want missing message_stop", err)
+	}
+	if result == nil || result.UpstreamEndpoint != "/v1/messages" {
+		t.Fatalf("unexpected native partial result: %#v", result)
+	}
+	if got := strings.Join(paths, ","); got != "/v1/messages" {
+		t.Fatalf("upstream paths = %q, fallback must not run", got)
+	}
+	if !strings.Contains(recorder.Body.String(), "partial") || strings.Contains(recorder.Body.String(), "message_stop") {
+		t.Fatalf("unexpected downstream stream: %s", recorder.Body.String())
+	}
+}
+
+func newCopilotNativeMessagesTestService(accountID int64, baseURL string) (*CopilotGatewayService, *Account) {
+	provider := NewCopilotTokenProvider(nil)
+	token := newCopilotTestToken("copilot-token-123")
+	provider.mu.Lock()
+	provider.tokens[accountID] = &token
+	provider.mu.Unlock()
+
+	return NewCopilotGatewayService(provider), &Account{
+		ID:       accountID,
+		Platform: PlatformCopilot,
+		Type:     AccountTypeAPIKey,
+		Credentials: map[string]any{
+			"github_token": "ghp_test",
+			"base_url":     baseURL,
+		},
 	}
 }

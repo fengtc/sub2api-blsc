@@ -53,3 +53,24 @@ func TestCopilotForwardResultHelpersPreserveCacheBreakdown(t *testing.T) {
 		t.Fatalf("unexpected chat usage: %#v", chatResult.Usage)
 	}
 }
+
+func TestCopilotForwardResultHelpersPreserveUpstreamEndpoint(t *testing.T) {
+	result := &service.CopilotForwardResult{
+		Model:            "claude-sonnet-5",
+		UpstreamEndpoint: "/v1/messages",
+	}
+
+	if got := copilotUpstreamEndpoint(result); got != "/v1/messages" {
+		t.Fatalf("copilotUpstreamEndpoint() = %q, want /v1/messages", got)
+	}
+	chatResult := copilotChatForwardResult(result, false, time.Second)
+	if chatResult.UpstreamEndpoint != "/v1/messages" {
+		t.Fatalf("chat UpstreamEndpoint = %q, want /v1/messages", chatResult.UpstreamEndpoint)
+	}
+	if got := copilotUpstreamEndpoint(&service.CopilotForwardResult{}); got != defaultCopilotUpstreamEndpoint {
+		t.Fatalf("empty endpoint fallback = %q, want %q", got, defaultCopilotUpstreamEndpoint)
+	}
+	if got := copilotUpstreamEndpoint(nil); got != defaultCopilotUpstreamEndpoint {
+		t.Fatalf("nil endpoint fallback = %q, want %q", got, defaultCopilotUpstreamEndpoint)
+	}
+}

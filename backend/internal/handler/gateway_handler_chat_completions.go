@@ -252,6 +252,7 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 		}
 		var result *service.ForwardResult
 		copilotStatusCode := http.StatusOK
+		setActualUpstreamEndpoint(c, "")
 		switch account.Platform {
 		case service.PlatformGemini:
 			if h.geminiCompatService == nil {
@@ -275,7 +276,19 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 				}
 			}
 		default:
-			result, err = h.gatewayService.ForwardAsChatCompletions(c.Request.Context(), c, account, forwardBody, parsedReq)
+			if shouldUseAntigravityCompat(account) {
+				if h.antigravityGatewayService == nil {
+					h.chatCompletionsErrorResponse(c, http.StatusBadGateway, "upstream_error", "Antigravity compatibility service is not configured")
+					if accountReleaseFunc != nil {
+						accountReleaseFunc()
+					}
+					return
+				}
+				setActualUpstreamEndpoint(c, EndpointAntigravityGenerateContent)
+				result, err = h.antigravityGatewayService.ForwardAsChatCompletions(c.Request.Context(), c, account, forwardBody, parsedReq)
+			} else {
+				result, err = h.gatewayService.ForwardAsChatCompletions(c.Request.Context(), c, account, forwardBody, parsedReq)
+			}
 		}
 
 		if accountReleaseFunc != nil {

@@ -26,6 +26,7 @@ const (
 	copilotNativeMessagesUserAgent    = "vscode_claude_code/2.1.112 (external, sdk-ts, agent-sdk/0.2.112)"
 	copilotNativeMessagesVersion      = "2023-06-01"
 	copilotNativeMessagesFallbackBody = 4 << 10
+	copilotNativeMessagesPreambleMax  = 64 << 10
 )
 
 var copilotNativeMessagesAllowedBetas = map[string]struct{}{
@@ -83,10 +84,10 @@ func (s *CopilotGatewayService) tryForwardNativeMessages(
 		"stream", isStream,
 		"latency_ms", time.Since(startTime).Milliseconds())
 
-	if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusMethodNotAllowed {
+	if shouldFallbackCopilotNativeMessagesStatus(resp.StatusCode) {
 		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, copilotNativeMessagesFallbackBody))
 		_ = resp.Body.Close()
-		slog.Debug("copilot native messages unavailable; falling back to chat completions",
+		slog.Debug("copilot native messages rejected; falling back to chat completions",
 			"account_id", account.ID,
 			"model", model,
 			"status", resp.StatusCode)
@@ -101,11 +102,26 @@ func (s *CopilotGatewayService) tryForwardNativeMessages(
 		return result, true, handleErr
 	}
 
+	writerSizeBefore := c.Writer.Size()
 	if isStream {
 		result, streamErr := s.handleNativeMessagesStreamingResponse(c, resp, model, startTime)
+		if streamErr != nil && c.Writer.Size() == writerSizeBefore {
+			slog.Debug("copilot native messages failed before response started; falling back to chat completions",
+				"account_id", account.ID,
+				"model", model,
+				"error", streamErr)
+			return nil, false, nil
+		}
 		return result, true, streamErr
 	}
 	result, responseErr := s.handleNativeMessagesNonStreamingResponse(c, resp, model)
+	if responseErr != nil && c.Writer.Size() == writerSizeBefore {
+		slog.Debug("copilot native messages failed before response started; falling back to chat completions",
+			"account_id", account.ID,
+			"model", model,
+			"error", responseErr)
+		return nil, false, nil
+	}
 	return result, true, responseErr
 }
 
@@ -170,6 +186,19 @@ func stripCopilotNativeCacheControlScope(body []byte) []byte {
 
 func shouldUseCopilotNativeMessages(model string) bool {
 	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(model)), "claude-")
+}
+
+func shouldFallbackCopilotNativeMessagesStatus(status int) bool {
+	switch status {
+	case http.StatusBadRequest,
+		http.StatusNotFound,
+		http.StatusMethodNotAllowed,
+		http.StatusUnsupportedMediaType,
+		http.StatusUnprocessableEntity:
+		return true
+	default:
+		return false
+	}
 }
 
 func copilotNativeMessagesHeaders(c *gin.Context, body []byte, metadataUserID string) http.Header {
@@ -311,6 +340,9 @@ func (s *CopilotGatewayService) handleNativeMessagesNonStreamingResponse(
 	if err != nil {
 		return nil, fmt.Errorf("copilot native messages: read response: %w", err)
 	}
+	if err := validateCopilotNativeMessageResponse(body); err != nil {
+		return nil, fmt.Errorf("copilot native messages: invalid response: %w", err)
+	}
 
 	usage := &CopilotUsage{}
 	usage.applyClaudeUsage(parseClaudeUsageFromResponseBody(body))
@@ -321,10 +353,49 @@ func (s *CopilotGatewayService) handleNativeMessagesNonStreamingResponse(
 	}
 	c.Data(http.StatusOK, contentType, body)
 	return &CopilotForwardResult{
-		StatusCode: http.StatusOK,
-		Model:      model,
-		Usage:      usage,
+		StatusCode:       http.StatusOK,
+		Model:            model,
+		Usage:            usage,
+		UpstreamEndpoint: "/v1/messages",
 	}, nil
+}
+
+func validateCopilotNativeMessageResponse(body []byte) error {
+	if len(bytes.TrimSpace(body)) == 0 {
+		return fmt.Errorf("empty body")
+	}
+
+	var payload struct {
+		ID      string          `json:"id"`
+		Type    string          `json:"type"`
+		Role    string          `json:"role"`
+		Content json.RawMessage `json:"content"`
+		Usage   json.RawMessage `json:"usage"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return fmt.Errorf("decode JSON: %w", err)
+	}
+	if strings.TrimSpace(payload.ID) == "" {
+		return fmt.Errorf("missing message id")
+	}
+	if payload.Type != "message" {
+		return fmt.Errorf("unexpected type %q", payload.Type)
+	}
+	if payload.Role != "assistant" {
+		return fmt.Errorf("unexpected role %q", payload.Role)
+	}
+	var content []json.RawMessage
+	if err := json.Unmarshal(payload.Content, &content); err != nil {
+		return fmt.Errorf("content is not an array: %w", err)
+	}
+	var usage map[string]json.RawMessage
+	if err := json.Unmarshal(payload.Usage, &usage); err != nil || usage == nil {
+		if err == nil {
+			err = fmt.Errorf("missing usage object")
+		}
+		return fmt.Errorf("invalid usage: %w", err)
+	}
+	return nil
 }
 
 func (s *CopilotGatewayService) handleNativeMessagesStreamingResponse(
@@ -348,46 +419,85 @@ func (s *CopilotGatewayService) handleNativeMessagesStreamingResponse(
 	claudeUsage := &ClaudeUsage{}
 	var firstTokenMs *int
 	clientDisconnected := false
+	sawMessageStart := false
+	sawMessageStop := false
+	pendingLines := make([]string, 0, 4)
+	pendingBytes := 0
+	var preambleErr error
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Buffer(make([]byte, 0, 256*1024), 256*1024)
 
+	writeLine := func(line string) {
+		if clientDisconnected {
+			return
+		}
+		if _, err := fmt.Fprintln(c.Writer, line); err != nil {
+			clientDisconnected = true
+		} else if line == "" {
+			flusher.Flush()
+		}
+	}
+
 	for scanner.Scan() {
 		line := scanner.Text()
+		eventType := ""
 		if data, ok := extractAnthropicSSEDataLine(line); ok {
 			data = strings.TrimSpace(data)
 			parseAnthropicSSEUsage(data, claudeUsage)
+			eventType = extractEventType(data)
 			if firstTokenMs == nil && copilotNativeMessagesEventStartsOutput(data) {
 				ms := int(time.Since(startTime).Milliseconds())
 				firstTokenMs = &ms
 			}
 		}
 
-		if !clientDisconnected {
-			if _, err := fmt.Fprintln(c.Writer, line); err != nil {
-				clientDisconnected = true
-			} else if line == "" {
-				flusher.Flush()
+		if !sawMessageStart {
+			pendingBytes += len(line) + 1
+			if pendingBytes > copilotNativeMessagesPreambleMax {
+				preambleErr = fmt.Errorf("preamble exceeds %d bytes without message_start", copilotNativeMessagesPreambleMax)
+				break
 			}
+			pendingLines = append(pendingLines, line)
+			if eventType != "message_start" {
+				continue
+			}
+			sawMessageStart = true
+			for _, pendingLine := range pendingLines {
+				writeLine(pendingLine)
+			}
+			pendingLines = nil
+			continue
 		}
+
+		if eventType == "message_stop" {
+			sawMessageStop = true
+		}
+		writeLine(line)
 	}
 
 	usage := &CopilotUsage{}
 	usage.applyClaudeUsage(claudeUsage)
+	result := &CopilotForwardResult{
+		StatusCode:       http.StatusOK,
+		Model:            model,
+		Usage:            usage,
+		FirstTokenMs:     firstTokenMs,
+		UpstreamEndpoint: "/v1/messages",
+	}
+	if preambleErr != nil {
+		return result, fmt.Errorf("copilot native messages: stream invalid: %w", preambleErr)
+	}
 	if err := scanner.Err(); err != nil {
-		return &CopilotForwardResult{
-			StatusCode:   http.StatusOK,
-			Model:        model,
-			Usage:        usage,
-			FirstTokenMs: firstTokenMs,
-		}, fmt.Errorf("copilot native messages: stream usage incomplete: %w", err)
+		return result, fmt.Errorf("copilot native messages: stream usage incomplete: %w", err)
+	}
+	if !sawMessageStart {
+		return result, fmt.Errorf("copilot native messages: stream invalid: missing message_start")
+	}
+	if !sawMessageStop {
+		return result, fmt.Errorf("copilot native messages: stream usage incomplete: missing message_stop")
 	}
 
-	return &CopilotForwardResult{
-		StatusCode:   http.StatusOK,
-		Model:        model,
-		Usage:        usage,
-		FirstTokenMs: firstTokenMs,
-	}, nil
+	return result, nil
 }
 
 func copilotNativeMessagesEventStartsOutput(data string) bool {

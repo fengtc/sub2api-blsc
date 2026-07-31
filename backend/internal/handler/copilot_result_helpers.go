@@ -1,10 +1,22 @@
 package handler
 
 import (
+	"strings"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
 )
+
+const defaultCopilotUpstreamEndpoint = "/chat/completions"
+
+func copilotUpstreamEndpoint(result *service.CopilotForwardResult) string {
+	if result != nil {
+		if endpoint := strings.TrimSpace(result.UpstreamEndpoint); endpoint != "" {
+			return endpoint
+		}
+	}
+	return defaultCopilotUpstreamEndpoint
+}
 
 func copilotClaudeUsage(usage *service.CopilotUsage) service.ClaudeUsage {
 	if usage == nil {
@@ -40,11 +52,12 @@ func copilotChatForwardResult(result *service.CopilotForwardResult, stream bool,
 		return nil
 	}
 	out := &service.OpenAIForwardResult{
-		Model:         result.Model,
-		UpstreamModel: result.Model,
-		Stream:        stream,
-		Duration:      duration,
-		FirstTokenMs:  result.FirstTokenMs,
+		Model:            result.Model,
+		UpstreamModel:    result.Model,
+		UpstreamEndpoint: copilotUpstreamEndpoint(result),
+		Stream:           stream,
+		Duration:         duration,
+		FirstTokenMs:     result.FirstTokenMs,
 	}
 	if result.Usage != nil {
 		out.Usage = service.OpenAIUsage{

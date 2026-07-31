@@ -646,6 +646,33 @@ func TestCopilotGatewayService_HandleMessagesStreamingResponse(t *testing.T) {
 	})
 }
 
+func TestCopilotGatewayService_HandleMessagesNonStreamingResponseRejectsInvalidBody(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	svc := &CopilotGatewayService{}
+
+	for _, body := range []string{"", "not-json", `{}`} {
+		t.Run(fmt.Sprintf("body_%q", body), func(t *testing.T) {
+			resp := &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       copilotStringReadCloser(body),
+			}
+			recorder := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(recorder)
+
+			result, err := svc.handleMessagesNonStreamingResponse(c, resp, "claude-sonnet-5")
+			if err == nil {
+				t.Fatal("expected invalid response error")
+			}
+			if result == nil || result.UpstreamEndpoint != "/chat/completions" {
+				t.Fatalf("unexpected result: %#v", result)
+			}
+			if recorder.Body.Len() != 0 {
+				t.Fatalf("invalid response leaked downstream: %q", recorder.Body.String())
+			}
+		})
+	}
+}
+
 func TestTranslateAnthropicToOpenAI_SanitizesMalformedToolHistory(t *testing.T) {
 	t.Run("valid tool chain remains tool calls", func(t *testing.T) {
 		body := []byte(`{
