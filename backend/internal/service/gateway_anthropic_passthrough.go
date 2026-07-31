@@ -614,6 +614,10 @@ func extractAnthropicSSEDataLine(line string) (string, bool) {
 }
 
 func (s *GatewayService) parseSSEUsagePassthrough(data string, usage *ClaudeUsage) {
+	parseAnthropicSSEUsage(data, usage)
+}
+
+func parseAnthropicSSEUsage(data string, usage *ClaudeUsage) {
 	if usage == nil || data == "" || data == "[DONE]" {
 		return
 	}

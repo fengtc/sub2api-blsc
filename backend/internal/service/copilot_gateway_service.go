@@ -108,9 +108,40 @@ type CopilotForwardResult struct {
 
 // CopilotUsage tracks token usage from a Copilot API response.
 type CopilotUsage struct {
-	PromptTokens     int `json:"prompt_tokens"`
-	CompletionTokens int `json:"completion_tokens"`
-	TotalTokens      int `json:"total_tokens"`
+	PromptTokens             int `json:"prompt_tokens"`
+	CompletionTokens         int `json:"completion_tokens"`
+	TotalTokens              int `json:"total_tokens"`
+	CacheCreationInputTokens int `json:"cache_creation_input_tokens,omitempty"`
+	CacheReadInputTokens     int `json:"cache_read_input_tokens,omitempty"`
+}
+
+func (u *CopilotUsage) applyChatUsage(usage *apicompat.ChatUsage) {
+	if u == nil || usage == nil {
+		return
+	}
+	u.PromptTokens = max(usage.PromptTokens, 0)
+	u.CompletionTokens = max(usage.CompletionTokens, 0)
+	u.TotalTokens = max(usage.TotalTokens, 0)
+	u.CacheCreationInputTokens = 0
+	u.CacheReadInputTokens = 0
+	if usage.PromptTokensDetails == nil {
+		return
+	}
+	u.CacheReadInputTokens = max(usage.PromptTokensDetails.CachedTokens, 0)
+	if usage.PromptTokensDetails.CacheWriteTokens > 0 {
+		u.CacheCreationInputTokens = usage.PromptTokensDetails.CacheWriteTokens
+	} else {
+		u.CacheCreationInputTokens = max(usage.PromptTokensDetails.CacheCreationTokens, 0)
+	}
+}
+
+// UncachedPromptTokens converts OpenAI prompt token semantics (total prompt
+// tokens) into Anthropic input token semantics (excluding cache read/write).
+func (u *CopilotUsage) UncachedPromptTokens() int {
+	if u == nil {
+		return 0
+	}
+	return max(u.PromptTokens-u.CacheReadInputTokens-u.CacheCreationInputTokens, 0)
 }
 
 // ForwardChatCompletions forwards a chat/completions request to the Copilot API.
@@ -436,22 +467,22 @@ func detectStreamMode(body []byte) bool {
 // parseStreamUsage extracts usage data from an SSE data line.
 func (s *CopilotGatewayService) parseStreamUsage(data string, usage *CopilotUsage) {
 	var chunk struct {
-		Usage *CopilotUsage `json:"usage"`
+		Usage *apicompat.ChatUsage `json:"usage"`
 	}
 	if err := json.Unmarshal([]byte(data), &chunk); err == nil && chunk.Usage != nil {
-		usage.PromptTokens = chunk.Usage.PromptTokens
-		usage.CompletionTokens = chunk.Usage.CompletionTokens
-		usage.TotalTokens = chunk.Usage.TotalTokens
+		usage.applyChatUsage(chunk.Usage)
 	}
 }
 
 // parseNonStreamUsage extracts usage data from a non-streaming response body.
 func (s *CopilotGatewayService) parseNonStreamUsage(body []byte) *CopilotUsage {
 	var resp struct {
-		Usage *CopilotUsage `json:"usage"`
+		Usage *apicompat.ChatUsage `json:"usage"`
 	}
 	if err := json.Unmarshal(body, &resp); err == nil && resp.Usage != nil {
-		return resp.Usage
+		usage := &CopilotUsage{}
+		usage.applyChatUsage(resp.Usage)
+		return usage
 	}
 	return &CopilotUsage{}
 }
@@ -543,6 +574,18 @@ func (s *CopilotGatewayService) ForwardMessages(
 	// Detect streaming before translation (we need to know for the response path).
 	isStream := detectAnthropicStream(anthropicBody)
 	anthropicSummary := summarizeCopilotAnthropicRequest(anthropicBody)
+
+	if result, handled, err := s.tryForwardNativeMessages(
+		ctx,
+		c,
+		account,
+		anthropicBody,
+		startTime,
+		isStream,
+		anthropicSummary,
+	); handled {
+		return result, err
+	}
 
 	// Translate Anthropic request → OpenAI format.
 	openAIBody, err := translateAnthropicToOpenAI(anthropicBody, account.GetModelMapping())
@@ -720,9 +763,7 @@ func (s *CopilotGatewayService) handleMessagesStreamingResponse(
 
 		// Accumulate usage.
 		if chunk.Usage != nil {
-			usage.PromptTokens = chunk.Usage.PromptTokens
-			usage.CompletionTokens = chunk.Usage.CompletionTokens
-			usage.TotalTokens = chunk.Usage.TotalTokens
+			usage.applyChatUsage(chunk.Usage)
 		}
 
 		if firstTokenMs == nil && chatChunkStartsResponsesOutput(&chunk) {

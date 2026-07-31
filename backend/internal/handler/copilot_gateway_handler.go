@@ -258,10 +258,7 @@ func (h *CopilotGatewayHandler) ChatCompletions(c *gin.Context) {
 					Model:        capturedResult.Model,
 					Stream:       reqStream,
 					FirstTokenMs: capturedResult.FirstTokenMs,
-					Usage: service.ClaudeUsage{
-						InputTokens:  capturedResult.Usage.PromptTokens,
-						OutputTokens: capturedResult.Usage.CompletionTokens,
-					},
+					Usage:        copilotClaudeUsage(capturedResult.Usage),
 				}
 				if err := h.gatewayService.RecordUsage(recordCtx, &service.RecordUsageInput{
 					Result:           fwdResult,
@@ -551,10 +548,7 @@ func (h *CopilotGatewayHandler) Messages(c *gin.Context) {
 					Model:        capturedResult.Model,
 					Stream:       reqStream,
 					FirstTokenMs: capturedResult.FirstTokenMs,
-					Usage: service.ClaudeUsage{
-						InputTokens:  capturedResult.Usage.PromptTokens,
-						OutputTokens: capturedResult.Usage.CompletionTokens,
-					},
+					Usage:        copilotClaudeUsage(capturedResult.Usage),
 				}
 				if err := h.gatewayService.RecordUsage(recordCtx, &service.RecordUsageInput{
 					Result:           fwdResult,

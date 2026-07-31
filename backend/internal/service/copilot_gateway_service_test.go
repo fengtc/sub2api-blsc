@@ -132,17 +132,26 @@ func TestCopilotGatewayService_ParseStreamUsage(t *testing.T) {
 
 	t.Run("valid usage", func(t *testing.T) {
 		usage := &CopilotUsage{}
-		data := `{"choices":[],"usage":{"prompt_tokens":10,"completion_tokens":20,"total_tokens":30}}`
+		data := `{"choices":[],"usage":{"prompt_tokens":100,"completion_tokens":20,"total_tokens":120,"prompt_tokens_details":{"cached_tokens":30,"cache_creation_tokens":99,"cache_write_tokens":20}}}`
 		svc.parseStreamUsage(data, usage)
 
-		if usage.PromptTokens != 10 {
-			t.Errorf("PromptTokens = %d, want 10", usage.PromptTokens)
+		if usage.PromptTokens != 100 {
+			t.Errorf("PromptTokens = %d, want 100", usage.PromptTokens)
 		}
 		if usage.CompletionTokens != 20 {
 			t.Errorf("CompletionTokens = %d, want 20", usage.CompletionTokens)
 		}
-		if usage.TotalTokens != 30 {
-			t.Errorf("TotalTokens = %d, want 30", usage.TotalTokens)
+		if usage.TotalTokens != 120 {
+			t.Errorf("TotalTokens = %d, want 120", usage.TotalTokens)
+		}
+		if usage.CacheReadInputTokens != 30 {
+			t.Errorf("CacheReadInputTokens = %d, want 30", usage.CacheReadInputTokens)
+		}
+		if usage.CacheCreationInputTokens != 20 {
+			t.Errorf("CacheCreationInputTokens = %d, want 20", usage.CacheCreationInputTokens)
+		}
+		if usage.UncachedPromptTokens() != 50 {
+			t.Errorf("UncachedPromptTokens = %d, want 50", usage.UncachedPromptTokens())
 		}
 	})
 
@@ -166,12 +175,21 @@ func TestCopilotGatewayService_ParseStreamUsage(t *testing.T) {
 	})
 
 	t.Run("updates existing usage", func(t *testing.T) {
-		usage := &CopilotUsage{PromptTokens: 5, CompletionTokens: 5, TotalTokens: 10}
+		usage := &CopilotUsage{
+			PromptTokens:             5,
+			CompletionTokens:         5,
+			TotalTokens:              10,
+			CacheCreationInputTokens: 2,
+			CacheReadInputTokens:     3,
+		}
 		data := `{"usage":{"prompt_tokens":15,"completion_tokens":25,"total_tokens":40}}`
 		svc.parseStreamUsage(data, usage)
 
 		if usage.TotalTokens != 40 {
 			t.Errorf("TotalTokens = %d, want 40 (should overwrite)", usage.TotalTokens)
+		}
+		if usage.CacheCreationInputTokens != 0 || usage.CacheReadInputTokens != 0 {
+			t.Errorf("cache details should be overwritten: %#v", usage)
 		}
 	})
 }
@@ -180,7 +198,7 @@ func TestCopilotGatewayService_ParseNonStreamUsage(t *testing.T) {
 	svc := &CopilotGatewayService{}
 
 	t.Run("valid usage", func(t *testing.T) {
-		body := []byte(`{"id":"chatcmpl-xxx","choices":[],"usage":{"prompt_tokens":100,"completion_tokens":50,"total_tokens":150}}`)
+		body := []byte(`{"id":"chatcmpl-xxx","choices":[],"usage":{"prompt_tokens":100,"completion_tokens":50,"total_tokens":150,"prompt_tokens_details":{"cached_tokens":30,"cache_creation_tokens":20}}}`)
 		usage := svc.parseNonStreamUsage(body)
 
 		if usage.PromptTokens != 100 {
@@ -191,6 +209,24 @@ func TestCopilotGatewayService_ParseNonStreamUsage(t *testing.T) {
 		}
 		if usage.TotalTokens != 150 {
 			t.Errorf("TotalTokens = %d, want 150", usage.TotalTokens)
+		}
+		if usage.CacheReadInputTokens != 30 {
+			t.Errorf("CacheReadInputTokens = %d, want 30", usage.CacheReadInputTokens)
+		}
+		if usage.CacheCreationInputTokens != 20 {
+			t.Errorf("CacheCreationInputTokens = %d, want 20", usage.CacheCreationInputTokens)
+		}
+		if usage.UncachedPromptTokens() != 50 {
+			t.Errorf("UncachedPromptTokens = %d, want 50", usage.UncachedPromptTokens())
+		}
+	})
+
+	t.Run("cache details cannot make uncached input negative", func(t *testing.T) {
+		body := []byte(`{"usage":{"prompt_tokens":10,"completion_tokens":1,"total_tokens":11,"prompt_tokens_details":{"cached_tokens":8,"cache_write_tokens":9}}}`)
+		usage := svc.parseNonStreamUsage(body)
+
+		if usage.UncachedPromptTokens() != 0 {
+			t.Errorf("UncachedPromptTokens = %d, want 0", usage.UncachedPromptTokens())
 		}
 	})
 
@@ -209,6 +245,26 @@ func TestCopilotGatewayService_ParseNonStreamUsage(t *testing.T) {
 			t.Errorf("TotalTokens = %d, want 0", usage.TotalTokens)
 		}
 	})
+}
+
+func TestBuildAnthropicUsagePreservesCacheBreakdown(t *testing.T) {
+	usage := buildAnthropicUsage(&openAIUsage{
+		PromptTokens:     100,
+		CompletionTokens: 7,
+		TotalTokens:      107,
+		PromptDetails: &openAIPromptDetails{
+			CachedTokens:        30,
+			CacheCreationTokens: 99,
+			CacheWriteTokens:    20,
+		},
+	})
+
+	if usage.InputTokens != 50 ||
+		usage.OutputTokens != 7 ||
+		usage.CacheReadInputTokens != 30 ||
+		usage.CacheCreationInputTokens != 20 {
+		t.Fatalf("unexpected Anthropic usage: %#v", usage)
+	}
 }
 
 func TestCopilotGatewayService_HandleNonStreamingResponse(t *testing.T) {
@@ -479,7 +535,7 @@ func TestCopilotGatewayService_HandleMessagesStreamingResponse(t *testing.T) {
 			"",
 			`data: {"id":"chatcmpl-1","model":"claude-sonnet-5","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
 			"",
-			`data: {"id":"chatcmpl-1","model":"claude-sonnet-5","choices":[],"usage":{"prompt_tokens":11,"completion_tokens":2,"total_tokens":13}}`,
+			`data: {"id":"chatcmpl-1","model":"claude-sonnet-5","choices":[],"usage":{"prompt_tokens":11,"completion_tokens":2,"total_tokens":13,"prompt_tokens_details":{"cached_tokens":3,"cache_write_tokens":2}}}`,
 			"",
 			"data: [DONE]",
 			"",
@@ -503,7 +559,10 @@ func TestCopilotGatewayService_HandleMessagesStreamingResponse(t *testing.T) {
 		if result.Usage == nil ||
 			result.Usage.PromptTokens != 11 ||
 			result.Usage.CompletionTokens != 2 ||
-			result.Usage.TotalTokens != 13 {
+			result.Usage.TotalTokens != 13 ||
+			result.Usage.CacheReadInputTokens != 3 ||
+			result.Usage.CacheCreationInputTokens != 2 ||
+			result.Usage.UncachedPromptTokens() != 6 {
 			t.Fatalf("unexpected usage: %#v", result.Usage)
 		}
 		if result.FirstTokenMs == nil {
@@ -517,7 +576,10 @@ func TestCopilotGatewayService_HandleMessagesStreamingResponse(t *testing.T) {
 		if strings.Count(body, "event: message_delta") != 1 {
 			t.Fatalf("message_delta count = %d, want 1\n%s", strings.Count(body, "event: message_delta"), body)
 		}
-		if !strings.Contains(body, `"usage":{"input_tokens":11,"output_tokens":2,`) {
+		if !strings.Contains(body, `"input_tokens":6`) ||
+			!strings.Contains(body, `"output_tokens":2`) ||
+			!strings.Contains(body, `"cache_creation_input_tokens":2`) ||
+			!strings.Contains(body, `"cache_read_input_tokens":3`) {
 			t.Fatalf("final message_delta should carry exact usage:\n%s", body)
 		}
 		if strings.Contains(body, "[DONE]") {
@@ -526,7 +588,7 @@ func TestCopilotGatewayService_HandleMessagesStreamingResponse(t *testing.T) {
 		if !strings.Contains(body, ": upstream-keepalive\n\n") {
 			t.Fatalf("SSE comment keepalive should be preserved:\n%s", body)
 		}
-		if usageAt, stopAt := strings.Index(body, `"input_tokens":11`), strings.Index(body, "event: message_stop"); usageAt < 0 || stopAt < usageAt {
+		if usageAt, stopAt := strings.Index(body, `"input_tokens":6`), strings.Index(body, "event: message_stop"); usageAt < 0 || stopAt < usageAt {
 			t.Fatalf("message_stop must follow final usage:\n%s", body)
 		}
 	})

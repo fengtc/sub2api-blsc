@@ -230,7 +230,9 @@ type openAIUsage struct {
 
 // openAIPromptDetails holds details about prompt tokens.
 type openAIPromptDetails struct {
-	CachedTokens int `json:"cached_tokens"`
+	CachedTokens        int `json:"cached_tokens"`
+	CacheCreationTokens int `json:"cache_creation_tokens,omitempty"`
+	CacheWriteTokens    int `json:"cache_write_tokens,omitempty"`
 }
 
 // openAIChatStreamChunk is a single SSE chunk in a streaming response.
@@ -860,8 +862,16 @@ func buildAnthropicUsage(u *openAIUsage) AnthropicUsage {
 		OutputTokens: u.CompletionTokens,
 	}
 	if u.PromptDetails != nil {
-		au.CacheReadInputTokens = u.PromptDetails.CachedTokens
-		au.InputTokens = u.PromptTokens - u.PromptDetails.CachedTokens
+		au.CacheReadInputTokens = max(u.PromptDetails.CachedTokens, 0)
+		if u.PromptDetails.CacheWriteTokens > 0 {
+			au.CacheCreationInputTokens = u.PromptDetails.CacheWriteTokens
+		} else {
+			au.CacheCreationInputTokens = max(u.PromptDetails.CacheCreationTokens, 0)
+		}
+		au.InputTokens = max(
+			u.PromptTokens-au.CacheReadInputTokens-au.CacheCreationInputTokens,
+			0,
+		)
 	}
 	return au
 }
