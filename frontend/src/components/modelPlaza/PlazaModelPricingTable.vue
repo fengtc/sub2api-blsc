@@ -144,6 +144,40 @@
                 </span>
                 <span class="ml-1 text-xs text-gray-400 dark:text-dark-500">{{ perUnitSuffix(m) }}</span>
               </template>
+              <div
+                v-else-if="billingMode(m) === BILLING_MODE_IMAGE && hasImageTokenPricing(m)"
+                class="flex flex-wrap items-center gap-1.5"
+              >
+                <span
+                  v-if="m.pricing?.input_price != null"
+                  class="inline-flex items-center gap-1 rounded-md bg-gray-100 px-2 py-0.5 font-mono text-xs text-gray-800 dark:bg-dark-700/60 dark:text-gray-200"
+                >
+                  <span class="font-sans text-gray-400 dark:text-dark-500">{{ t('modelPlaza.table.input') }}</span>
+                  {{ paidPerMillion(m.pricing.input_price) }}
+                </span>
+                <span
+                  v-if="m.pricing?.image_input_price != null"
+                  class="inline-flex items-center gap-1 rounded-md bg-gray-100 px-2 py-0.5 font-mono text-xs text-gray-800 dark:bg-dark-700/60 dark:text-gray-200"
+                >
+                  <span class="font-sans text-gray-400 dark:text-dark-500">{{ t('modelPlaza.table.imageInput') }}</span>
+                  {{ paidPerMillion(m.pricing.image_input_price) }}
+                </span>
+                <span
+                  v-if="m.pricing?.output_price != null"
+                  class="inline-flex items-center gap-1 rounded-md bg-gray-100 px-2 py-0.5 font-mono text-xs text-gray-800 dark:bg-dark-700/60 dark:text-gray-200"
+                >
+                  <span class="font-sans text-gray-400 dark:text-dark-500">{{ t('modelPlaza.table.output') }}</span>
+                  {{ paidPerMillion(m.pricing.output_price) }}
+                </span>
+                <span
+                  v-if="m.pricing?.image_output_price != null"
+                  class="inline-flex items-center gap-1 rounded-md bg-gray-100 px-2 py-0.5 font-mono text-xs text-gray-800 dark:bg-dark-700/60 dark:text-gray-200"
+                >
+                  <span class="font-sans text-gray-400 dark:text-dark-500">{{ t('modelPlaza.table.imageOutput') }}</span>
+                  {{ paidPerMillion(m.pricing.image_output_price) }}
+                </span>
+                <span class="text-[11px] text-gray-400 dark:text-dark-500">{{ t('modelPlaza.table.unitPerMillion') }}</span>
+              </div>
               <span v-else class="text-gray-400 dark:text-dark-500">-</span>
             </td>
           </template>
@@ -285,6 +319,17 @@ function hasCachePricing(m: PlazaModel): boolean {
 
 function hasOfficialCache(o: NonNullable<PlazaModel['official_pricing']>): boolean {
   return o.cache_write_price != null || o.cache_read_price != null || o.cache_write_1h_price != null
+}
+
+/** 图片模型若按 image token 计费，展示 token 单价而不是误标成“每张”。 */
+function hasImageTokenPricing(m: PlazaModel): boolean {
+  const pricing = m.pricing
+  return pricing != null && (
+    pricing.input_price != null ||
+    pricing.image_input_price != null ||
+    pricing.output_price != null ||
+    pricing.image_output_price != null
+  )
 }
 
 /** token 模式的阶梯定价(内联进输入/输出列)。 */

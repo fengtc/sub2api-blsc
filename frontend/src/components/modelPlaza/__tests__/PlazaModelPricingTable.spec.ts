@@ -254,4 +254,35 @@ describe('PlazaModelPricingTable', () => {
     // 旧 bug:image_output_price × 0.1 = 0.000003 被当按次价
     expect(text).not.toContain('$0.000003')
   })
+
+  it('按图模型没有按张价时展示 image token 单价,并保留每百万 token 单位', () => {
+    const model = tokenModel({
+      name: 'gpt-image-2',
+      pricing: {
+        billing_mode: 'image',
+        input_price: 5e-6,
+        output_price: 1e-5,
+        cache_write_price: null,
+        cache_read_price: null,
+        image_input_price: null,
+        image_output_price: 3e-5,
+        per_request_price: null,
+        intervals: []
+      },
+      official_pricing: null
+    })
+    const wrapper = mountTable([model], 0.5)
+    const text = wrapper.text()
+
+    expect(text).toContain('modelPlaza.table.perImage')
+    expect(text).toContain('modelPlaza.table.input')
+    expect(text).toContain('modelPlaza.table.output')
+    expect(text).toContain('modelPlaza.table.imageOutput')
+    expect(text).toContain('modelPlaza.table.unitPerMillion')
+    // 折后：文本输入 $2.50、文本输出 $5.00、图片输出 $15.00 / 1M token。
+    expect(text).toContain('$2.50')
+    expect(text).toContain('$5.00')
+    expect(text).toContain('$15.00')
+    expect(text).not.toContain('modelPlaza.table.perUnitImage')
+  })
 })
