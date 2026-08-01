@@ -33,7 +33,7 @@
       <section class="doc-panel">
         <h3 class="doc-title">创建 OpenAI 组 API Key</h3>
         <ol class="doc-list">
-          <li>左侧菜单进入 <strong>模型广场</strong>，复制模型名 <code>gpt-5.5</code>。</li>
+          <li>从顶部导航进入 <strong>模型广场</strong>，复制模型名 <code>gpt-5.5</code>。</li>
           <li>进入 <strong>API 密钥</strong>，点击创建 API Key。</li>
           <li>分组选择 <code>openai</code>，名称可填写 <code>openai-test-key</code>。</li>
           <li>保存后复制生成的 API Key。</li>
@@ -44,7 +44,7 @@
       <section class="doc-panel">
         <h3 class="doc-title">创建 Claude 组 API Key</h3>
         <ol class="doc-list">
-          <li>左侧菜单进入 <strong>模型广场</strong>，复制模型名 <code>claude-opus-4-8</code>。</li>
+          <li>从顶部导航进入 <strong>模型广场</strong>，复制模型名 <code>claude-opus-4-8</code>。</li>
           <li>进入 <strong>API 密钥</strong>，点击创建 API Key。</li>
           <li>分组选择 <code>claude</code>，名称可填写 <code>claude-test-key</code>。</li>
           <li>保存后复制生成的 API Key。</li>

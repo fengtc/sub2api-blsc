@@ -53,3 +53,10 @@ describe('AppSidebar header styles', () => {
     expect(sidebarBrandBlockMatch?.[0]).not.toContain('overflow: hidden;')
   })
 })
+
+describe('AppSidebar model plaza navigation', () => {
+  it('keeps the model plaza out of the left sidebar', () => {
+    expect(componentSource).not.toContain("path: '/models'")
+    expect(componentSource).not.toContain("t('nav.modelPlaza')")
+  })
+})
