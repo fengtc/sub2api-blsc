@@ -35,7 +35,7 @@ func NewModelPlazaHandler(
 	}
 }
 
-// modelPlazaOfficialPricing LiteLLM 官方参考价（USD per token）。
+// modelPlazaOfficialPricing 全局参考价（USD per token）。
 type modelPlazaOfficialPricing struct {
 	InputPrice        *float64 `json:"input_price"`
 	OutputPrice       *float64 `json:"output_price"`

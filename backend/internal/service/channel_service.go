@@ -154,21 +154,29 @@ type ChannelService struct {
 	repo                 ChannelRepository
 	groupRepo            GroupRepository
 	authCacheInvalidator APIKeyAuthCacheInvalidator
-	pricingService       *PricingService // 用于「可用渠道」展示时回落到全局定价；可为 nil（测试场景）
+	pricingService       *PricingService // 展示时优先使用动态全局定价；可为 nil（测试场景）
+	billingService       *BillingService // 展示时复用真实计费的内置兜底价；可为 nil（测试场景）
 
 	cache   atomic.Value // *channelCache
 	cacheSF singleflight.Group
 }
 
 // NewChannelService 创建渠道服务实例。
-// pricingService 仅供 ListAvailable 在渠道未配置定价时回落到全局 LiteLLM 数据；
-// 计费热路径走独立的 ModelPricingResolver，与此参数无关。可传 nil。
-func NewChannelService(repo ChannelRepository, groupRepo GroupRepository, authCacheInvalidator APIKeyAuthCacheInvalidator, pricingService *PricingService) *ChannelService {
+// pricingService 与 billingService 仅供用户侧渠道/模型广场展示默认价格；
+// 计费热路径仍走独立的 ModelPricingResolver。测试场景均可传 nil。
+func NewChannelService(
+	repo ChannelRepository,
+	groupRepo GroupRepository,
+	authCacheInvalidator APIKeyAuthCacheInvalidator,
+	pricingService *PricingService,
+	billingService *BillingService,
+) *ChannelService {
 	s := &ChannelService{
 		repo:                 repo,
 		groupRepo:            groupRepo,
 		authCacheInvalidator: authCacheInvalidator,
 		pricingService:       pricingService,
+		billingService:       billingService,
 	}
 	return s
 }

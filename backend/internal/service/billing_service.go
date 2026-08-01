@@ -819,6 +819,22 @@ func (s *BillingService) getFallbackPricing(model string) *ModelPricing {
 	return nil
 }
 
+// getFallbackPricingForDisplay 返回模型广场/可用渠道使用的内置兜底价。
+// 它只读取 BillingService 的硬编码价格表，不重复查询动态价格源，也不会记录
+// 计费 fallback 告警。返回克隆，避免展示层意外修改共享价格配置。
+func (s *BillingService) getFallbackPricingForDisplay(model string) *ModelPricing {
+	if s == nil {
+		return nil
+	}
+	model = strings.ToLower(model)
+	pricing := s.applyModelSpecificPricingPolicy(model, s.getFallbackPricing(model))
+	if pricing == nil {
+		return nil
+	}
+	cloned := *pricing
+	return &cloned
+}
+
 // GetModelPricing 获取模型价格配置
 func (s *BillingService) GetModelPricing(model string) (*ModelPricing, error) {
 	// 标准化模型名称（转小写）

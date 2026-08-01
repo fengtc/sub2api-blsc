@@ -148,7 +148,7 @@
             </td>
           </template>
 
-          <!-- 官方价格(LiteLLM 参考价,不乘倍率) -->
+          <!-- 全局参考价（动态价格源或 Sub2API 内置兜底价，不乘倍率） -->
           <td
             class="border-l border-gray-100 px-3 py-2.5 align-middle font-mono text-xs text-gray-500 dark:border-dark-700/60 dark:text-dark-400"
           >

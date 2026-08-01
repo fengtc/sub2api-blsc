@@ -7,8 +7,8 @@ import (
 	"strings"
 )
 
-// PlazaOfficialPricing 模型广场展示用的 LiteLLM 官方参考价（USD per token）。
-// 字段为 nil 表示官方数据中该项缺失（0 视为未配置）。
+// PlazaOfficialPricing 模型广场展示用的全局参考价（USD per token）。
+// 动态价格源未覆盖时会使用 Sub2API 的内置计费兜底价；字段为 nil 表示缺失。
 type PlazaOfficialPricing struct {
 	InputPrice        *float64
 	OutputPrice       *float64
@@ -17,7 +17,7 @@ type PlazaOfficialPricing struct {
 	CacheReadPrice    *float64
 }
 
-// PlazaModel 模型广场中单个模型条目：渠道定价 + 官方参考价。
+// PlazaModel 模型广场中单个模型条目：渠道定价 + 全局参考价。
 type PlazaModel struct {
 	Name            string
 	Platform        string
@@ -50,7 +50,7 @@ type PlazaGroup struct {
 // 平台隔离），仅把顶层从渠道换成分组：
 //   - 渠道按 lower(name) 排序后遍历，保证同名模型去重结果确定；
 //   - 同分组同名模型「先见者胜」，仅当已存条目无定价而新条目有定价时升级替换；
-//   - 每个模型附带 LiteLLM 官方参考价（查不到为 nil）；
+//   - 每个模型附带动态或内置兜底参考价（查不到为 nil）；
 //   - 只返回 Models 非空的分组；分组按 RateMultiplier 升序（同倍率按名称），
 //     组内模型按名称排序。
 //
@@ -98,7 +98,6 @@ func (s *ChannelService) ListPlazaGroups(ctx context.Context) ([]PlazaGroup, err
 		}
 		ch.normalizeBillingModelSource()
 		supported := ch.SupportedModels()
-		s.fillGlobalPricingFallback(supported)
 
 		for _, gid := range ch.GroupIDs {
 			pg, ok := byGroup[gid]
@@ -140,7 +139,19 @@ func (s *ChannelService) ListPlazaGroups(ctx context.Context) ([]PlazaGroup, err
 			continue
 		}
 		sort.SliceStable(pg.Models, func(i, j int) bool { return pg.Models[i].Name < pg.Models[j].Name })
+		// 先完成跨渠道去重，再统一补默认价。这样同一模型只要任一渠道有明确价格，
+		// 就一定优先于其他渠道的全局 fallback，不受渠道名称排序影响。
+		displayModels := make([]SupportedModel, len(pg.Models))
 		for j := range pg.Models {
+			displayModels[j] = SupportedModel{
+				Name:     pg.Models[j].Name,
+				Platform: pg.Models[j].Platform,
+				Pricing:  pg.Models[j].Pricing,
+			}
+		}
+		s.fillGlobalPricingFallback(displayModels)
+		for j := range pg.Models {
+			pg.Models[j].Pricing = displayModels[j].Pricing
 			pg.Models[j].OfficialPricing = s.lookupOfficialPricing(pg.Models[j].Name, officialMemo)
 		}
 		out = append(out, *pg)
@@ -155,29 +166,49 @@ func (s *ChannelService) ListPlazaGroups(ctx context.Context) ([]PlazaGroup, err
 	return out, nil
 }
 
-// lookupOfficialPricing 查询模型的 LiteLLM 官方参考价，带 memo 避免同名模型重复转换。
-// pricingService 为 nil（测试场景）或查不到时返回 nil。
+// lookupOfficialPricing 查询模型的全局参考价，带 memo 避免同名模型重复转换。
+// 动态价格源优先；未命中时复用 BillingService 的内置兜底价。
 func (s *ChannelService) lookupOfficialPricing(modelName string, memo map[string]*PlazaOfficialPricing) *PlazaOfficialPricing {
-	if s.pricingService == nil {
+	if s.pricingService == nil && s.billingService == nil {
 		return nil
 	}
 	if cached, ok := memo[modelName]; ok {
 		return cached
 	}
 	var result *PlazaOfficialPricing
-	if lp := s.pricingService.GetModelPricing(modelName); lp != nil && !lp.TokenPricingAbsent {
-		result = &PlazaOfficialPricing{
-			InputPrice:        nonZeroPtr(lp.InputCostPerToken),
-			OutputPrice:       nonZeroPtr(lp.OutputCostPerToken),
-			CacheWritePrice:   nonZeroPtr(lp.CacheCreationInputTokenCost),
-			CacheWrite1hPrice: nonZeroPtr(lp.CacheCreationInputTokenCostAbove1hr),
-			CacheReadPrice:    nonZeroPtr(lp.CacheReadInputTokenCost),
+	if s.pricingService != nil {
+		if lp := s.pricingService.GetModelPricing(modelName); lp != nil && !lp.TokenPricingAbsent {
+			result = &PlazaOfficialPricing{
+				InputPrice:        nonZeroPtr(lp.InputCostPerToken),
+				OutputPrice:       nonZeroPtr(lp.OutputCostPerToken),
+				CacheWritePrice:   nonZeroPtr(lp.CacheCreationInputTokenCost),
+				CacheWrite1hPrice: nonZeroPtr(lp.CacheCreationInputTokenCostAbove1hr),
+				CacheReadPrice:    nonZeroPtr(lp.CacheReadInputTokenCost),
+			}
+			if result.InputPrice == nil && result.OutputPrice == nil &&
+				result.CacheWritePrice == nil && result.CacheWrite1hPrice == nil && result.CacheReadPrice == nil {
+				result = nil
+			}
 		}
-		if result.InputPrice == nil && result.OutputPrice == nil &&
-			result.CacheWritePrice == nil && result.CacheWrite1hPrice == nil && result.CacheReadPrice == nil {
-			result = nil
-		}
+	}
+	if result == nil && s.billingService != nil {
+		result = plazaOfficialPricingFromBillingFallback(
+			s.billingService.getFallbackPricingForDisplay(modelName),
+		)
 	}
 	memo[modelName] = result
 	return result
+}
+
+func plazaOfficialPricingFromBillingFallback(mp *ModelPricing) *PlazaOfficialPricing {
+	if mp == nil {
+		return nil
+	}
+	return &PlazaOfficialPricing{
+		InputPrice:        pricePtr(mp.InputPricePerToken),
+		OutputPrice:       pricePtr(mp.OutputPricePerToken),
+		CacheWritePrice:   nonZeroPtr(firstNonZero(mp.CacheCreation5mPrice, mp.CacheCreationPricePerToken)),
+		CacheWrite1hPrice: nonZeroPtr(mp.CacheCreation1hPrice),
+		CacheReadPrice:    nonZeroPtr(mp.CacheReadPricePerToken),
+	}
 }

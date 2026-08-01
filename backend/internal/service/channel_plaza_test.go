@@ -7,17 +7,31 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/stretchr/testify/require"
 )
 
 // newPlazaChannelService 构造 ListPlazaGroups 测试用的 ChannelService。
 func newPlazaChannelService(channels []Channel, groups []Group, pricing *PricingService) *ChannelService {
+	return newPlazaChannelServiceWithBilling(channels, groups, pricing, nil)
+}
+
+func newPlazaChannelServiceWithBilling(
+	channels []Channel,
+	groups []Group,
+	pricing *PricingService,
+	billing *BillingService,
+) *ChannelService {
 	repo := &mockChannelRepository{
 		listAllFn: func(ctx context.Context) ([]Channel, error) { return channels, nil },
 	}
-	svc := NewChannelService(repo, &stubGroupRepoForAvailable{activeGroups: groups}, nil, nil)
-	svc.pricingService = pricing
-	return svc
+	return NewChannelService(
+		repo,
+		&stubGroupRepoForAvailable{activeGroups: groups},
+		nil,
+		pricing,
+		billing,
+	)
 }
 
 func plazaPricedChannel(id int64, name string, groupIDs []int64, platform string, models ...string) Channel {
@@ -33,6 +47,22 @@ func plazaPricedChannel(id int64, name string, groupIDs []int64, platform string
 			InputPrice:  testPtrFloat64(3e-6),
 			OutputPrice: testPtrFloat64(1.5e-5),
 		}},
+	}
+}
+
+func plazaMappingOnlyChannel(id int64, name string, groupIDs []int64, platform string, models ...string) Channel {
+	mapping := make(map[string]string, len(models))
+	for _, model := range models {
+		mapping[model] = model
+	}
+	return Channel{
+		ID:       id,
+		Name:     name,
+		Status:   StatusActive,
+		GroupIDs: groupIDs,
+		ModelMapping: map[string]map[string]string{
+			platform: mapping,
+		},
 	}
 }
 
@@ -78,6 +108,44 @@ func TestListPlazaGroups_DedupFirstWinsWithPricingUpgrade(t *testing.T) {
 	require.Len(t, out[0].Models, 1)
 	require.NotNil(t, out[0].Models[0].Pricing, "无价条目应被有价条目升级")
 	require.NotNil(t, out[0].Models[0].Pricing.InputPrice)
+}
+
+func TestListPlazaGroups_ExplicitChannelPricingWinsOverEarlierBillingFallback(t *testing.T) {
+	const modelName = "glm-4.7"
+	mappingOnly := plazaMappingOnlyChannel(
+		1,
+		"alpha-mapping-only",
+		[]int64{10},
+		PlatformOpenAI,
+		modelName,
+	)
+	explicit := plazaPricedChannel(
+		2,
+		"beta-explicit-pricing",
+		[]int64{10},
+		PlatformOpenAI,
+		modelName,
+	)
+	groups := []Group{{ID: 10, Name: "g", Platform: PlatformOpenAI, RateMultiplier: 1}}
+	svc := newPlazaChannelServiceWithBilling(
+		[]Channel{explicit, mappingOnly},
+		groups,
+		nil,
+		NewBillingService(&config.Config{}, nil),
+	)
+
+	out, err := svc.ListPlazaGroups(context.Background())
+	require.NoError(t, err)
+	require.Len(t, out, 1)
+	require.Len(t, out[0].Models, 1)
+	pricing := out[0].Models[0].Pricing
+	require.NotNil(t, pricing)
+	require.NotNil(t, pricing.InputPrice)
+	require.NotNil(t, pricing.OutputPrice)
+	require.InDelta(t, 3e-6, *pricing.InputPrice, 1e-12,
+		"later 渠道的明确输入价必须覆盖 earlier mapping-only 渠道的展示 fallback")
+	require.InDelta(t, 15e-6, *pricing.OutputPrice, 1e-12,
+		"later 渠道的明确输出价必须覆盖 earlier mapping-only 渠道的展示 fallback")
 }
 
 func TestListPlazaGroups_PlatformIsolation(t *testing.T) {
@@ -173,12 +241,170 @@ func TestListPlazaGroups_OfficialPricingFill(t *testing.T) {
 	require.Nil(t, byName["token-absent"].OfficialPricing)
 }
 
+func TestListPlazaGroups_BillingFallbackFillsPaidAndOfficialPricing(t *testing.T) {
+	tests := []struct {
+		model      string
+		input      float64
+		output     float64
+		cacheRead  float64
+		imageInput float64
+	}{
+		{model: "GLM-4.7", input: 0.6e-6, output: 2.2e-6, cacheRead: 0.11e-6},
+		{model: "GLM-5-Turbo", input: 1.2e-6, output: 4e-6, cacheRead: 0.24e-6},
+		{model: "GLM-5.2", input: 1.4e-6, output: 4.4e-6, cacheRead: 0.26e-6},
+		{model: "kimi-k3", input: 3e-6, output: 15e-6, cacheRead: 0.30e-6},
+		{model: "minimax-m3", input: 0.60e-6, output: 2.40e-6, cacheRead: 0.12e-6},
+		{model: "deepseek-v4-pro", input: 0.435e-6, output: 0.87e-6, cacheRead: 0.003625e-6},
+		{model: "grok-4.5", input: 2e-6, output: 6e-6, cacheRead: 0.5e-6},
+		{
+			model:      "doubao-embedding-vision",
+			input:      0.098e-6,
+			output:     0,
+			imageInput: 0.252e-6,
+		},
+	}
+	models := make([]string, 0, len(tests))
+	for _, tt := range tests {
+		models = append(models, tt.model)
+	}
+
+	channels := []Channel{
+		plazaMappingOnlyChannel(1, "fallback-only", []int64{10}, PlatformOpenAI, models...),
+	}
+	groups := []Group{{ID: 10, Name: "g", Platform: PlatformOpenAI, RateMultiplier: 1}}
+	billing := NewBillingService(&config.Config{}, nil)
+	svc := newPlazaChannelServiceWithBilling(channels, groups, nil, billing)
+	out, err := svc.ListPlazaGroups(context.Background())
+	require.NoError(t, err)
+	require.Len(t, out, 1)
+	require.Len(t, out[0].Models, len(tests))
+
+	byName := make(map[string]PlazaModel, len(out[0].Models))
+	for _, model := range out[0].Models {
+		byName[model.Name] = model
+	}
+	for _, tt := range tests {
+		t.Run(tt.model, func(t *testing.T) {
+			model, ok := byName[tt.model]
+			require.True(t, ok)
+
+			require.NotNil(t, model.Pricing, "计费 fallback 应补齐实付价格")
+			require.NotNil(t, model.Pricing.InputPrice)
+			require.NotNil(t, model.Pricing.OutputPrice, "0 价也必须用非 nil 指针明确表达")
+			require.InDelta(t, tt.input, *model.Pricing.InputPrice, 1e-12)
+			require.InDelta(t, tt.output, *model.Pricing.OutputPrice, 1e-12)
+			if tt.cacheRead > 0 {
+				require.NotNil(t, model.Pricing.CacheReadPrice)
+				require.InDelta(t, tt.cacheRead, *model.Pricing.CacheReadPrice, 1e-12)
+			}
+			if tt.imageInput > 0 {
+				require.NotNil(t, model.Pricing.ImageInputPrice)
+				require.InDelta(t, tt.imageInput, *model.Pricing.ImageInputPrice, 1e-12)
+			}
+
+			require.NotNil(t, model.OfficialPricing, "计费 fallback 应同时补齐官方参考价格")
+			require.NotNil(t, model.OfficialPricing.InputPrice)
+			require.NotNil(t, model.OfficialPricing.OutputPrice, "0 价也必须用非 nil 指针明确表达")
+			require.InDelta(t, tt.input, *model.OfficialPricing.InputPrice, 1e-12)
+			require.InDelta(t, tt.output, *model.OfficialPricing.OutputPrice, 1e-12)
+			if tt.cacheRead > 0 {
+				require.NotNil(t, model.OfficialPricing.CacheReadPrice)
+				require.InDelta(t, tt.cacheRead, *model.OfficialPricing.CacheReadPrice, 1e-12)
+			}
+		})
+	}
+}
+
+func TestListPlazaGroups_BillingFallbackPreservesExplicitFreePrice(t *testing.T) {
+	const modelName = "glm-4.7-flash"
+	channels := []Channel{
+		plazaMappingOnlyChannel(1, "free-fallback", []int64{10}, PlatformOpenAI, modelName),
+	}
+	groups := []Group{{ID: 10, Name: "g", Platform: PlatformOpenAI, RateMultiplier: 1}}
+	svc := newPlazaChannelServiceWithBilling(
+		channels,
+		groups,
+		nil,
+		NewBillingService(&config.Config{}, nil),
+	)
+
+	out, err := svc.ListPlazaGroups(context.Background())
+	require.NoError(t, err)
+	require.Len(t, out, 1)
+	require.Len(t, out[0].Models, 1)
+	model := out[0].Models[0]
+
+	require.NotNil(t, model.Pricing)
+	require.NotNil(t, model.Pricing.InputPrice, "免费价格应显示 0，而不是缺失")
+	require.NotNil(t, model.Pricing.OutputPrice, "免费价格应显示 0，而不是缺失")
+	require.Zero(t, *model.Pricing.InputPrice)
+	require.Zero(t, *model.Pricing.OutputPrice)
+	require.NotNil(t, model.OfficialPricing)
+	require.NotNil(t, model.OfficialPricing.InputPrice)
+	require.NotNil(t, model.OfficialPricing.OutputPrice)
+	require.Zero(t, *model.OfficialPricing.InputPrice)
+	require.Zero(t, *model.OfficialPricing.OutputPrice)
+}
+
+func TestListPlazaGroups_BillingFallbackUnknownModelRemainsUnpriced(t *testing.T) {
+	const modelName = "vendor-model-without-known-pricing"
+	channels := []Channel{
+		plazaMappingOnlyChannel(1, "unknown", []int64{10}, PlatformOpenAI, modelName),
+	}
+	groups := []Group{{ID: 10, Name: "g", Platform: PlatformOpenAI, RateMultiplier: 1}}
+	svc := newPlazaChannelServiceWithBilling(
+		channels,
+		groups,
+		nil,
+		NewBillingService(&config.Config{}, nil),
+	)
+
+	out, err := svc.ListPlazaGroups(context.Background())
+	require.NoError(t, err)
+	require.Len(t, out, 1)
+	require.Len(t, out[0].Models, 1)
+	require.Nil(t, out[0].Models[0].Pricing)
+	require.Nil(t, out[0].Models[0].OfficialPricing)
+}
+
+func TestListPlazaGroups_ImageOnlyDynamicPricingFillsPaidPriceOnly(t *testing.T) {
+	const modelName = "image-only-model"
+	pricingSvc := newStubPricingServiceFromMap(map[string]*LiteLLMModelPricing{
+		modelName: {
+			Mode:               "image_generation",
+			TokenPricingAbsent: true,
+			OutputCostPerImage: 0.04,
+		},
+	})
+	channels := []Channel{
+		plazaMappingOnlyChannel(1, "image-only", []int64{10}, PlatformOpenAI, modelName),
+	}
+	groups := []Group{{ID: 10, Name: "g", Platform: PlatformOpenAI, RateMultiplier: 1}}
+	svc := newPlazaChannelServiceWithBilling(
+		channels,
+		groups,
+		pricingSvc,
+		NewBillingService(&config.Config{}, pricingSvc),
+	)
+
+	out, err := svc.ListPlazaGroups(context.Background())
+	require.NoError(t, err)
+	require.Len(t, out, 1)
+	require.Len(t, out[0].Models, 1)
+	model := out[0].Models[0]
+	require.NotNil(t, model.Pricing)
+	require.Equal(t, BillingModeImage, model.Pricing.BillingMode)
+	require.NotNil(t, model.Pricing.PerRequestPrice)
+	require.InDelta(t, 0.04, *model.Pricing.PerRequestPrice, 1e-12)
+	require.Nil(t, model.OfficialPricing, "仅有按图价时不能伪装成 token 官方价")
+}
+
 func TestListPlazaGroups_RepoErrorsPropagate(t *testing.T) {
 	sentinel := errors.New("boom")
 	repo := &mockChannelRepository{
 		listAllFn: func(ctx context.Context) ([]Channel, error) { return nil, sentinel },
 	}
-	svc := NewChannelService(repo, &stubGroupRepoForAvailable{}, nil, nil)
+	svc := NewChannelService(repo, &stubGroupRepoForAvailable{}, nil, nil, nil)
 	out, err := svc.ListPlazaGroups(context.Background())
 	require.Nil(t, out)
 	require.ErrorIs(t, err, sentinel)
@@ -186,7 +412,7 @@ func TestListPlazaGroups_RepoErrorsPropagate(t *testing.T) {
 	svc2 := NewChannelService(
 		&mockChannelRepository{listAllFn: func(ctx context.Context) ([]Channel, error) { return nil, nil }},
 		&stubGroupRepoForAvailable{listActiveErr: sentinel},
-		nil, nil,
+		nil, nil, nil,
 	)
 	out2, err2 := svc2.ListPlazaGroups(context.Background())
 	require.Nil(t, out2)
