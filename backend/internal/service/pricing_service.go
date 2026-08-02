@@ -566,15 +566,27 @@ func (s *PricingService) mergeFallbackPricingData(data map[string]*LiteLLMModelP
 		return data
 	}
 	merged := 0
+	overridden := 0
 	for modelName, pricing := range fallbackData {
-		if _, ok := data[modelName]; ok {
+		_, exists := data[modelName]
+		// codex-auto-review uses Sub2API's evidence-based bundled rate as the
+		// authoritative source. The remote catalog can lag this dedicated model
+		// and otherwise silently restore its obsolete public-model pricing.
+		if exists && modelName != "codex-auto-review" {
 			continue
 		}
 		data[modelName] = pricing
-		merged++
+		if exists {
+			overridden++
+		} else {
+			merged++
+		}
 	}
 	if merged > 0 {
 		logger.LegacyPrintf("service.pricing", "[Pricing] Merged %d fallback-only models", merged)
+	}
+	if overridden > 0 {
+		logger.LegacyPrintf("service.pricing", "[Pricing] Applied %d authoritative bundled model prices", overridden)
 	}
 	return data
 }

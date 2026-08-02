@@ -378,6 +378,49 @@ func TestPricingService_MergesFallbackOnlyModels(t *testing.T) {
 	require.InDelta(t, 0.034, merged["gemini-3.1-flash-lite-image"].OutputCostPerImage, 1e-12)
 }
 
+func TestPricingService_CodexAutoReviewFallbackIsAuthoritative(t *testing.T) {
+	dir := t.TempDir()
+	fallbackFile := filepath.Join(dir, "fallback.json")
+	require.NoError(t, os.WriteFile(fallbackFile, []byte(`{
+		"codex-auto-review": {
+			"input_cost_per_token": 0.0000002,
+			"output_cost_per_token": 0.0000012,
+			"cache_read_input_token_cost": 0.00000002,
+			"litellm_provider": "openai",
+			"mode": "chat"
+		},
+		"remote-model": {
+			"input_cost_per_token": 0.000001,
+			"litellm_provider": "test",
+			"mode": "chat"
+		}
+	}`), 0644))
+
+	svc := &PricingService{cfg: &config.Config{}}
+	svc.cfg.Pricing.FallbackFile = fallbackFile
+	remoteData, err := svc.parsePricingData([]byte(`{
+		"codex-auto-review": {
+			"input_cost_per_token": 0.000005,
+			"output_cost_per_token": 0.00003,
+			"cache_read_input_token_cost": 0.0000005,
+			"litellm_provider": "openai",
+			"mode": "chat"
+		},
+		"remote-model": {
+			"input_cost_per_token": 0.000002,
+			"litellm_provider": "test",
+			"mode": "chat"
+		}
+	}`))
+	require.NoError(t, err)
+
+	merged := svc.mergeFallbackPricingData(remoteData)
+	require.InDelta(t, 0.2e-6, merged["codex-auto-review"].InputCostPerToken, 1e-12)
+	require.InDelta(t, 1.2e-6, merged["codex-auto-review"].OutputCostPerToken, 1e-12)
+	require.InDelta(t, 0.02e-6, merged["codex-auto-review"].CacheReadInputTokenCost, 1e-12)
+	require.InDelta(t, 0.000002, merged["remote-model"].InputCostPerToken, 1e-12)
+}
+
 func TestGetModelPricing_Gpt53CodexSparkUsesGpt51CodexPricing(t *testing.T) {
 	sparkPricing := &LiteLLMModelPricing{InputCostPerToken: 1}
 	gpt53Pricing := &LiteLLMModelPricing{InputCostPerToken: 9}
@@ -555,7 +598,7 @@ func TestDefaultPricingIncludesGemini36FlashRates(t *testing.T) {
 	}
 }
 
-func TestDefaultPricingIncludesCodexAutoReview(t *testing.T) {
+func TestDefaultPricingUsesCurrentCodexAutoReviewBaseRates(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join("..", "..", "resources", "model-pricing", "model_prices_and_context_window.json"))
 	require.NoError(t, err)
 
@@ -566,9 +609,19 @@ func TestDefaultPricingIncludesCodexAutoReview(t *testing.T) {
 
 	got := svc.GetModelPricing("codex-auto-review")
 	require.NotNil(t, got)
-	require.InDelta(t, 5e-6, got.InputCostPerToken, 1e-12)
-	require.InDelta(t, 3e-5, got.OutputCostPerToken, 1e-12)
-	require.InDelta(t, 5e-7, got.CacheReadInputTokenCost, 1e-12)
+	require.InDelta(t, 0.2e-6, got.InputCostPerToken, 1e-12)
+	require.InDelta(t, 1.2e-6, got.OutputCostPerToken, 1e-12)
+	require.InDelta(t, 0.02e-6, got.CacheReadInputTokenCost, 1e-12)
+
+	// Auto-review is an internal Codex model. Do not infer public GPT-5.6 API
+	// service-tier, cache-write, or long-context pricing without an upstream
+	// usage contract for this dedicated model.
+	require.Zero(t, got.InputCostPerTokenPriority)
+	require.Zero(t, got.OutputCostPerTokenPriority)
+	require.Zero(t, got.CacheReadInputTokenCostPriority)
+	require.Zero(t, got.CacheCreationInputTokenCost)
+	require.Zero(t, got.CacheCreationInputTokenCostPriority)
+	require.Zero(t, got.LongContextInputTokenThreshold)
 }
 
 func TestGetModelPricing_Gpt54MiniUsesDedicatedStaticFallbackWhenRemoteMissing(t *testing.T) {
