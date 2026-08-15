@@ -16,6 +16,7 @@ func TestProvideAccountTestServiceInjectsCopilotTokenProvider(t *testing.T) {
 		nil,
 		nil,
 		nil,
+		nil,
 	)
 
 	if service.copilotTokenProvider != provider {
