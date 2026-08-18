@@ -69,3 +69,12 @@ describe('AppSidebar hidden commercial-code navigation', () => {
     expect(componentSource).not.toContain("t('nav.promoCodes')")
   })
 })
+
+describe('AppSidebar hidden channel-management navigation', () => {
+  it('keeps channel management and its child links out of the left sidebar', () => {
+    expect(componentSource).not.toContain("path: '/admin/channels'")
+    expect(componentSource).not.toContain("path: '/admin/channels/pricing'")
+    expect(componentSource).not.toContain("path: '/admin/channels/monitor'")
+    expect(componentSource).not.toContain("t('nav.channelManagement')")
+  })
+})
