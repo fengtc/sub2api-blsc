@@ -563,13 +563,10 @@ function mountView() {
   });
 }
 
-async function openPaymentTab(wrapper: ReturnType<typeof mountView>) {
-  const paymentTabButton = wrapper
-    .findAll("button")
-    .find((node) => node.text().includes("admin.settings.tabs.payment"));
-
-  expect(paymentTabButton).toBeDefined();
-  await paymentTabButton?.trigger("click");
+async function assertPaymentSettingsHidden(wrapper: ReturnType<typeof mountView>) {
+  expect(wrapper.find("#settings-tab-payment").exists()).toBe(false);
+  expect(wrapper.get('[data-testid="payment-settings-panel"]').attributes("style"))
+    .toContain("display: none");
   await flushPromises();
 }
 
@@ -777,7 +774,7 @@ describe("admin SettingsView payment visible method controls", () => {
     const wrapper = mountView();
 
     await flushPromises();
-    await openPaymentTab(wrapper);
+    await assertPaymentSettingsHidden(wrapper);
 
     expect(wrapper.text()).not.toContain("可见方式");
     expect(wrapper.text()).not.toContain("支付来源");
@@ -1038,7 +1035,7 @@ describe("admin SettingsView payment visible method controls", () => {
     const wrapper = mountView();
 
     await flushPromises();
-    await openPaymentTab(wrapper);
+    await assertPaymentSettingsHidden(wrapper);
 
     const paymentLinks = wrapper
       .findAll("a")
@@ -1054,7 +1051,7 @@ describe("admin SettingsView payment visible method controls", () => {
     const wrapper = mountView();
 
     await flushPromises();
-    await openPaymentTab(wrapper);
+    await assertPaymentSettingsHidden(wrapper);
     await wrapper.find("form").trigger("submit.prevent");
     await flushPromises();
 
@@ -1238,7 +1235,7 @@ describe("admin SettingsView payment visible method controls", () => {
     });
 
     await flushPromises();
-    await openPaymentTab(wrapper);
+    await assertPaymentSettingsHidden(wrapper);
     await wrapper.get(".provider-toggle-stub").trigger("click");
     await flushPromises();
 
@@ -1446,7 +1443,7 @@ describe("admin SettingsView payment visible method controls", () => {
     const wrapper = mountView();
 
     await flushPromises();
-    await openPaymentTab(wrapper);
+    await assertPaymentSettingsHidden(wrapper);
 
     const imageUploads = wrapper.findAll(".image-upload-stub");
     expect(imageUploads.length).toBeGreaterThan(0);
@@ -1515,7 +1512,7 @@ describe("admin SettingsView payment visible method controls", () => {
     });
 
     await flushPromises();
-    await openPaymentTab(wrapper);
+    await assertPaymentSettingsHidden(wrapper);
 
     // The provider should still be in the list
     expect(receivedProviders.length).toBe(1);

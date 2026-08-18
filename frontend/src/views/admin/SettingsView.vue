@@ -7662,7 +7662,11 @@
 
         <!-- Tab: Email -->
         <!-- Tab: Payment -->
-        <div v-show="activeTab === 'payment'" class="space-y-6">
+        <div
+          v-show="activeTab === 'payment'"
+          data-testid="payment-settings-panel"
+          class="space-y-6"
+        >
           <!-- Payment System Settings -->
           <div class="card">
             <div
@@ -8824,7 +8828,8 @@ const settingsTabs = [
   { key: "security" as SettingsTab, icon: "shield" as const },
   { key: "users" as SettingsTab, icon: "user" as const },
   { key: "gateway" as SettingsTab, icon: "server" as const },
-  { key: "payment" as SettingsTab, icon: "creditCard" as const },
+  // Payment configuration remains supported by the backend but is intentionally
+  // omitted from the customer-facing system-settings navigation.
   { key: "email" as SettingsTab, icon: "mail" as const },
   { key: "backup" as SettingsTab, icon: "database" as const },
 ];
