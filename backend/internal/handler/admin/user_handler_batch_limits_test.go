@@ -22,6 +22,7 @@ type batchLimitsAdminServiceCall struct {
 	userIDs     []int64
 	concurrency *int
 	rpmLimit    *int
+	tpmLimit    *int
 }
 
 func cloneIntPointer(value *int) *int {
@@ -32,11 +33,12 @@ func cloneIntPointer(value *int) *int {
 	return &cloned
 }
 
-func (s *batchLimitsAdminServiceStub) BatchUpdateLimits(_ context.Context, userIDs []int64, concurrency, rpmLimit *int) (int, error) {
+func (s *batchLimitsAdminServiceStub) BatchUpdateLimits(_ context.Context, userIDs []int64, concurrency, rpmLimit, tpmLimit *int) (int, error) {
 	s.calls = append(s.calls, batchLimitsAdminServiceCall{
 		userIDs:     append([]int64(nil), userIDs...),
 		concurrency: cloneIntPointer(concurrency),
 		rpmLimit:    cloneIntPointer(rpmLimit),
+		tpmLimit:    cloneIntPointer(tpmLimit),
 	})
 	return len(userIDs), nil
 }
@@ -68,10 +70,12 @@ func TestUserHandlerBatchUpdateLimitsAcceptsPartialAndZeroValues(t *testing.T) {
 		body                string
 		expectedConcurrency *int
 		expectedRPMLimit    *int
+		expectedTPMLimit    *int
 	}{
 		{name: "concurrency only", body: `{"user_ids":[1,2],"concurrency":10}`, expectedConcurrency: pointerTo(10)},
 		{name: "both limits", body: `{"user_ids":[1,2],"concurrency":8,"rpm_limit":60}`, expectedConcurrency: pointerTo(8), expectedRPMLimit: pointerTo(60)},
 		{name: "explicit zero", body: `{"user_ids":[1,2],"concurrency":0,"rpm_limit":0}`, expectedConcurrency: pointerTo(0), expectedRPMLimit: pointerTo(0)},
+		{name: "tpm only", body: `{"user_ids":[1,2],"tpm_limit":120000}`, expectedTPMLimit: pointerTo(120000)},
 	}
 
 	for _, test := range tests {
@@ -84,6 +88,7 @@ func TestUserHandlerBatchUpdateLimitsAcceptsPartialAndZeroValues(t *testing.T) {
 			require.Equal(t, []int64{1, 2}, serviceStub.calls[0].userIDs)
 			require.Equal(t, test.expectedConcurrency, serviceStub.calls[0].concurrency)
 			require.Equal(t, test.expectedRPMLimit, serviceStub.calls[0].rpmLimit)
+			require.Equal(t, test.expectedTPMLimit, serviceStub.calls[0].tpmLimit)
 
 			var response struct {
 				Data struct {

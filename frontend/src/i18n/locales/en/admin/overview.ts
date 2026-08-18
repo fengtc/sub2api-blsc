@@ -444,6 +444,7 @@ export default {
         selectUser: 'Select {email}',
         enableConcurrency: 'Update concurrency',
         enableRPMLimit: 'Update RPM limit',
+        enableTPMLimit: 'Update TPM limit',
         unlimited: 'Unlimited',
         nonNegativeInteger: 'Enter a non-negative whole number.',
         apply: 'Apply limits',
@@ -451,6 +452,8 @@ export default {
         concurrencyValue: 'Concurrency: {value}',
         rpmValue: 'RPM: {value}',
         rpmUnlimitedValue: 'RPM: Unlimited',
+        tpmValue: 'TPM: {value}',
+        tpmUnlimitedValue: 'TPM: Unlimited',
         confirm: 'Overwrite limits for {count} users?\n{fields}',
         success: 'Updated limits for {count} users',
         failed: 'Failed to update user limits'
@@ -514,7 +517,10 @@ export default {
         selectStatus: 'Select status',
         rpmLimit: 'Requests Per Minute (RPM)',
         rpmLimitPlaceholder: '0 = unlimited',
-        rpmLimitHint: 'Max requests per minute for this user; 0 = unlimited. Acts as a fallback only when the group has no rpm_limit set.'
+        rpmLimitHint: 'Max requests per minute for this user; 0 = unlimited. Acts as a fallback only when the group has no rpm_limit set.',
+        tpmLimit: 'Tokens Per Minute (TPM)',
+        tpmLimitPlaceholder: '0 = unlimited',
+        tpmLimitHint: 'Maximum actual tokens per minute across all API keys, models, and groups for this user; 0 = unlimited.'
       },
       columns: {
         user: 'User',
@@ -533,6 +539,7 @@ export default {
         usageGemini: 'Usage (Gemini)',
         usageAntigravity: 'Usage (Antigravity)',
         concurrency: 'Concurrency',
+        tpmLimit: 'TPM Limit',
         status: 'Status',
         lastActive: 'Last Active',
         lastUsed: 'Last Used',

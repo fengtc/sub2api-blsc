@@ -16,15 +16,17 @@ type batchLimitsUserRepoStub struct {
 	userIDs     []int64
 	concurrency *int
 	rpmLimit    *int
+	tpmLimit    *int
 	affected    int
 	err         error
 }
 
-func (s *batchLimitsUserRepoStub) BatchUpdateLimits(_ context.Context, userIDs []int64, concurrency, rpmLimit *int) (int, error) {
+func (s *batchLimitsUserRepoStub) BatchUpdateLimits(_ context.Context, userIDs []int64, concurrency, rpmLimit, tpmLimit *int) (int, error) {
 	s.calls++
 	s.userIDs = append([]int64(nil), userIDs...)
 	s.concurrency = cloneBatchLimitValue(concurrency)
 	s.rpmLimit = cloneBatchLimitValue(rpmLimit)
+	s.tpmLimit = cloneBatchLimitValue(tpmLimit)
 	return s.affected, s.err
 }
 
@@ -50,6 +52,7 @@ func TestAdminServiceBatchUpdateLimitsPassesOnlyProvidedFields(t *testing.T) {
 		[]int64{3, 0, 3, 7, -1},
 		&concurrency,
 		nil,
+		nil,
 	)
 
 	require.NoError(t, err)
@@ -69,7 +72,7 @@ func TestAdminServiceBatchUpdateLimitsDoesNotInvalidateCacheOnRepositoryError(t 
 	invalidator := &authCacheInvalidatorStub{}
 	service := &adminServiceImpl{userRepo: repo, authCacheInvalidator: invalidator}
 
-	affected, err := service.BatchUpdateLimits(context.Background(), []int64{1, 2}, nil, &rpmLimit)
+	affected, err := service.BatchUpdateLimits(context.Background(), []int64{1, 2}, nil, &rpmLimit, nil)
 
 	require.EqualError(t, err, "database unavailable")
 	require.Zero(t, affected)
@@ -80,7 +83,7 @@ func TestAdminServiceBatchUpdateLimitsRequiresAField(t *testing.T) {
 	repo := &batchLimitsUserRepoStub{userRepoStub: &userRepoStub{}}
 	service := &adminServiceImpl{userRepo: repo, authCacheInvalidator: &authCacheInvalidatorStub{}}
 
-	affected, err := service.BatchUpdateLimits(context.Background(), []int64{1}, nil, nil)
+	affected, err := service.BatchUpdateLimits(context.Background(), []int64{1}, nil, nil, nil)
 
 	require.Error(t, err)
 	require.Zero(t, affected)

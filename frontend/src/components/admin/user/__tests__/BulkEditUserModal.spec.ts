@@ -102,6 +102,22 @@ describe('BulkEditUserModal', () => {
     expect(wrapper.emitted('success')).toEqual([[2]])
   })
 
+  it('submits a TPM limit independently', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const wrapper = mountModal()
+
+    await wrapper.get('[data-test="enable-tpm-limit"]').trigger('click')
+    await wrapper.get('[data-test="tpm-limit-input"]').setValue('120000')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+
+    expect(batchUpdateLimits).toHaveBeenCalledWith({
+      user_ids: [4, 7],
+      all: false,
+      tpm_limit: 120000
+    })
+  })
+
   it('omits disabled fields from the request', async () => {
     vi.spyOn(window, 'confirm').mockReturnValue(true)
     const wrapper = mountModal()

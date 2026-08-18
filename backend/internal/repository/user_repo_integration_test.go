@@ -209,7 +209,7 @@ func (s *UserRepoSuite) TestBatchUpdateLimitsUpdatesOnlyProvidedFields() {
 	})
 	concurrency := 9
 
-	affected, err := s.repo.BatchUpdateLimits(s.ctx, []int64{user.ID}, &concurrency, nil)
+	affected, err := s.repo.BatchUpdateLimits(s.ctx, []int64{user.ID}, &concurrency, nil, nil)
 	s.Require().NoError(err)
 	s.Equal(1, affected)
 
@@ -227,7 +227,7 @@ func (s *UserRepoSuite) TestBatchUpdateLimitsUpdatesBothFieldsToZero() {
 	})
 	zero := 0
 
-	affected, err := s.repo.BatchUpdateLimits(s.ctx, []int64{user.ID}, &zero, &zero)
+	affected, err := s.repo.BatchUpdateLimits(s.ctx, []int64{user.ID}, &zero, &zero, nil)
 	s.Require().NoError(err)
 	s.Equal(1, affected)
 
@@ -243,7 +243,7 @@ func (s *UserRepoSuite) TestBatchUpdateLimitsIgnoresDeletedUsersAndReturnsAffect
 	s.Require().NoError(s.client.User.DeleteOneID(deleted.ID).Exec(s.ctx))
 	rpmLimit := 45
 
-	affected, err := s.repo.BatchUpdateLimits(s.ctx, []int64{active.ID, deleted.ID}, nil, &rpmLimit)
+	affected, err := s.repo.BatchUpdateLimits(s.ctx, []int64{active.ID, deleted.ID}, nil, &rpmLimit, nil)
 	s.Require().NoError(err)
 	s.Equal(1, affected)
 

@@ -115,6 +115,10 @@ func (User) Fields() []ent.Field {
 		// 用户级每分钟请求数上限（0 = 不限制）。仅当所在分组未设置 rpm_limit 时作为兜底生效。
 		field.Int("rpm_limit").
 			Default(0),
+
+		// 用户级每分钟 Token 数上限（0 = 不限制）。按用户所有 API Key、模型和分组合并统计。
+		field.Int("tpm_limit").
+			Default(0),
 	}
 }
 

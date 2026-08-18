@@ -48431,6 +48431,8 @@ type UserMutation struct {
 	addtotal_recharged            *float64
 	rpm_limit                     *int
 	addrpm_limit                  *int
+	tpm_limit                     *int
+	addtpm_limit                  *int
 	clearedFields                 map[string]struct{}
 	api_keys                      map[int64]struct{}
 	removedapi_keys               map[int64]struct{}
@@ -49637,6 +49639,62 @@ func (m *UserMutation) ResetRpmLimit() {
 	m.addrpm_limit = nil
 }
 
+// SetTpmLimit sets the "tpm_limit" field.
+func (m *UserMutation) SetTpmLimit(i int) {
+	m.tpm_limit = &i
+	m.addtpm_limit = nil
+}
+
+// TpmLimit returns the value of the "tpm_limit" field in the mutation.
+func (m *UserMutation) TpmLimit() (r int, exists bool) {
+	v := m.tpm_limit
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldTpmLimit returns the old "tpm_limit" field's value of the User entity.
+// If the User object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UserMutation) OldTpmLimit(ctx context.Context) (v int, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldTpmLimit is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldTpmLimit requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldTpmLimit: %w", err)
+	}
+	return oldValue.TpmLimit, nil
+}
+
+// AddTpmLimit adds i to the "tpm_limit" field.
+func (m *UserMutation) AddTpmLimit(i int) {
+	if m.addtpm_limit != nil {
+		*m.addtpm_limit += i
+	} else {
+		m.addtpm_limit = &i
+	}
+}
+
+// AddedTpmLimit returns the value that was added to the "tpm_limit" field in this mutation.
+func (m *UserMutation) AddedTpmLimit() (r int, exists bool) {
+	v := m.addtpm_limit
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetTpmLimit resets all changes to the "tpm_limit" field.
+func (m *UserMutation) ResetTpmLimit() {
+	m.tpm_limit = nil
+	m.addtpm_limit = nil
+}
+
 // AddAPIKeyIDs adds the "api_keys" edge to the APIKey entity by ids.
 func (m *UserMutation) AddAPIKeyIDs(ids ...int64) {
 	if m.api_keys == nil {
@@ -50373,7 +50431,7 @@ func (m *UserMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *UserMutation) Fields() []string {
-	fields := make([]string, 0, 24)
+	fields := make([]string, 0, 25)
 	if m.created_at != nil {
 		fields = append(fields, user.FieldCreatedAt)
 	}
@@ -50446,6 +50504,9 @@ func (m *UserMutation) Fields() []string {
 	if m.rpm_limit != nil {
 		fields = append(fields, user.FieldRpmLimit)
 	}
+	if m.tpm_limit != nil {
+		fields = append(fields, user.FieldTpmLimit)
+	}
 	return fields
 }
 
@@ -50502,6 +50563,8 @@ func (m *UserMutation) Field(name string) (ent.Value, bool) {
 		return m.TotalRecharged()
 	case user.FieldRpmLimit:
 		return m.RpmLimit()
+	case user.FieldTpmLimit:
+		return m.TpmLimit()
 	}
 	return nil, false
 }
@@ -50559,6 +50622,8 @@ func (m *UserMutation) OldField(ctx context.Context, name string) (ent.Value, er
 		return m.OldTotalRecharged(ctx)
 	case user.FieldRpmLimit:
 		return m.OldRpmLimit(ctx)
+	case user.FieldTpmLimit:
+		return m.OldTpmLimit(ctx)
 	}
 	return nil, fmt.Errorf("unknown User field %s", name)
 }
@@ -50736,6 +50801,13 @@ func (m *UserMutation) SetField(name string, value ent.Value) error {
 		}
 		m.SetRpmLimit(v)
 		return nil
+	case user.FieldTpmLimit:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetTpmLimit(v)
+		return nil
 	}
 	return fmt.Errorf("unknown User field %s", name)
 }
@@ -50762,6 +50834,9 @@ func (m *UserMutation) AddedFields() []string {
 	if m.addrpm_limit != nil {
 		fields = append(fields, user.FieldRpmLimit)
 	}
+	if m.addtpm_limit != nil {
+		fields = append(fields, user.FieldTpmLimit)
+	}
 	return fields
 }
 
@@ -50782,6 +50857,8 @@ func (m *UserMutation) AddedField(name string) (ent.Value, bool) {
 		return m.AddedTotalRecharged()
 	case user.FieldRpmLimit:
 		return m.AddedRpmLimit()
+	case user.FieldTpmLimit:
+		return m.AddedTpmLimit()
 	}
 	return nil, false
 }
@@ -50832,6 +50909,13 @@ func (m *UserMutation) AddField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.AddRpmLimit(v)
+		return nil
+	case user.FieldTpmLimit:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddTpmLimit(v)
 		return nil
 	}
 	return fmt.Errorf("unknown User numeric field %s", name)
@@ -50970,6 +51054,9 @@ func (m *UserMutation) ResetField(name string) error {
 		return nil
 	case user.FieldRpmLimit:
 		m.ResetRpmLimit()
+		return nil
+	case user.FieldTpmLimit:
+		m.ResetTpmLimit()
 		return nil
 	}
 	return fmt.Errorf("unknown User field %s", name)

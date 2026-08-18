@@ -1,6 +1,10 @@
 <template>
-  <div v-if="attributes.length > 0" class="space-y-4">
-    <div v-for="attr in attributes" :key="attr.id">
+  <div v-if="visibleAttributes.length > 0" class="space-y-4">
+    <div
+      v-for="attr in visibleAttributes"
+      :key="attr.id"
+      :data-attribute-key="attr.key"
+    >
       <label class="input-label">
         {{ attr.name }}
         <span v-if="attr.required" class="text-red-500">*</span>
@@ -92,7 +96,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, onMounted } from 'vue'
+import { computed, ref, watch, onMounted } from 'vue'
 import { adminAPI } from '@/api/admin'
 import type { UserAttributeDefinition, UserAttributeValuesMap } from '@/types'
 import Select from '@/components/common/Select.vue'
@@ -100,6 +104,8 @@ import Select from '@/components/common/Select.vue'
 interface Props {
   userId?: number
   modelValue: UserAttributeValuesMap
+  includeKeys?: string[]
+  excludeKeys?: string[]
 }
 
 interface Emits {
@@ -112,6 +118,13 @@ const emit = defineEmits<Emits>()
 const loading = ref(false)
 const attributes = ref<UserAttributeDefinition[]>([])
 const localValues = ref<UserAttributeValuesMap>({})
+
+const visibleAttributes = computed(() => attributes.value.filter((attr) => {
+  if (props.includeKeys?.length && !props.includeKeys.includes(attr.key)) {
+    return false
+  }
+  return !props.excludeKeys?.includes(attr.key)
+}))
 
 const loadAttributes = async () => {
   loading.value = true
@@ -179,9 +192,7 @@ const toggleMultiSelectOption = (attrId: number, optionValue: string) => {
 }
 
 watch(() => props.modelValue, (newVal) => {
-  if (newVal && Object.keys(newVal).length > 0) {
-    localValues.value = { ...newVal }
-  }
+  localValues.value = { ...(newVal || {}) }
 }, { immediate: true })
 
 watch(() => props.userId, (newUserId) => {

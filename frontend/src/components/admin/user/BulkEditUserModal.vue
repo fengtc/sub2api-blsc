@@ -60,6 +60,33 @@
             </p>
           </div>
         </div>
+
+        <div class="space-y-3 py-4">
+          <div class="flex items-center justify-between gap-4">
+            <label for="bulk-tpm-limit" class="input-label mb-0">
+              {{ t('admin.users.form.tpmLimit') }}
+            </label>
+            <Toggle
+              v-model="enableTPMLimit"
+              :aria-label="t('admin.users.bulkLimits.enableTPMLimit')"
+              data-test="enable-tpm-limit"
+            />
+          </div>
+          <div v-if="enableTPMLimit">
+            <input
+              id="bulk-tpm-limit"
+              v-model="tpmLimitValue"
+              type="number"
+              min="0"
+              step="1"
+              class="input"
+              data-test="tpm-limit-input"
+            />
+            <p v-if="parsedTPMLimit === 0" class="input-hint">
+              {{ t('admin.users.bulkLimits.unlimited') }}
+            </p>
+          </div>
+        </div>
       </div>
 
       <p v-if="hasInvalidValue" class="text-sm text-red-600 dark:text-red-400">
@@ -112,8 +139,10 @@ const { t } = useI18n()
 const appStore = useAppStore()
 const enableConcurrency = ref(false)
 const enableRPMLimit = ref(false)
+const enableTPMLimit = ref(false)
 const concurrencyValue = ref<string | number>('')
 const rpmLimitValue = ref<string | number>('')
+const tpmLimitValue = ref<string | number>('')
 const submitting = ref(false)
 const MAX_BATCH_USER_IDS = 500
 
@@ -131,12 +160,16 @@ const parsedConcurrency = computed(() =>
 const parsedRPMLimit = computed(() =>
   enableRPMLimit.value ? parseLimit(rpmLimitValue.value) : undefined
 )
+const parsedTPMLimit = computed(() =>
+  enableTPMLimit.value ? parseLimit(tpmLimitValue.value) : undefined
+)
 const hasInvalidValue = computed(() =>
-  parsedConcurrency.value === null || parsedRPMLimit.value === null
+  parsedConcurrency.value === null || parsedRPMLimit.value === null || parsedTPMLimit.value === null
 )
 const hasUpdate = computed(() =>
   (parsedConcurrency.value !== undefined && parsedConcurrency.value !== null)
   || (parsedRPMLimit.value !== undefined && parsedRPMLimit.value !== null)
+  || (parsedTPMLimit.value !== undefined && parsedTPMLimit.value !== null)
 )
 const selectionTooLarge = computed(() => props.selectedIds.length > MAX_BATCH_USER_IDS)
 const canSubmit = computed(() =>
@@ -150,8 +183,10 @@ const canSubmit = computed(() =>
 const reset = () => {
   enableConcurrency.value = false
   enableRPMLimit.value = false
+  enableTPMLimit.value = false
   concurrencyValue.value = ''
   rpmLimitValue.value = ''
+  tpmLimitValue.value = ''
   submitting.value = false
 }
 
@@ -182,6 +217,14 @@ const handleSubmit = async () => {
       parsedRPMLimit.value === 0
         ? t('admin.users.bulkLimits.rpmUnlimitedValue')
         : t('admin.users.bulkLimits.rpmValue', { value: parsedRPMLimit.value })
+    )
+  }
+  if (parsedTPMLimit.value !== undefined && parsedTPMLimit.value !== null) {
+    request.tpm_limit = parsedTPMLimit.value
+    fields.push(
+      parsedTPMLimit.value === 0
+        ? t('admin.users.bulkLimits.tpmUnlimitedValue')
+        : t('admin.users.bulkLimits.tpmValue', { value: parsedTPMLimit.value })
     )
   }
 

@@ -21,6 +21,9 @@ type userRPMCacheStub struct {
 	userGroupErr    error
 	userCounts      []int
 	userErr         error
+	tpmUsed         int
+	tpmErr          error
+	tpmAdded        int
 }
 
 func (s *userRPMCacheStub) IncrementUserGroupRPM(_ context.Context, _, _ int64) (int, error) {
@@ -51,6 +54,19 @@ func (s *userRPMCacheStub) GetUserGroupRPM(_ context.Context, _, _ int64) (int, 
 
 func (s *userRPMCacheStub) GetUserRPM(_ context.Context, _ int64) (int, error) {
 	return 0, nil
+}
+
+func (s *userRPMCacheStub) AddUserTPM(_ context.Context, _ int64, tokens int) (int, error) {
+	if s.tpmErr != nil {
+		return 0, s.tpmErr
+	}
+	s.tpmAdded += tokens
+	s.tpmUsed += tokens
+	return s.tpmUsed, nil
+}
+
+func (s *userRPMCacheStub) GetUserTPM(_ context.Context, _ int64) (int, error) {
+	return s.tpmUsed, s.tpmErr
 }
 
 // rpmOverrideRepoStub 专用于 checkRPM 分支测试，只实现必要方法。
@@ -250,4 +266,29 @@ func TestBillingCacheService_CheckRPM_NilUserIsNoop(t *testing.T) {
 	require.EqualValues(t, 0, atomic.LoadInt32(&cache.userGroupCalls))
 	require.EqualValues(t, 0, atomic.LoadInt32(&cache.userCalls))
 	require.EqualValues(t, 0, atomic.LoadInt32(&repo.calls))
+}
+
+func TestBillingCacheService_CheckTPM_RejectsAtLimit(t *testing.T) {
+	cache := &userRPMCacheStub{tpmUsed: 1000}
+	svc := newBillingServiceForRPM(t, cache, nil)
+
+	require.ErrorIs(t, svc.checkTPM(context.Background(), &User{ID: 1, TPMLimit: 1000}), ErrUserTPMExceeded)
+	require.NoError(t, svc.checkTPM(context.Background(), &User{ID: 1, TPMLimit: 1001}))
+	require.NoError(t, svc.checkTPM(context.Background(), &User{ID: 1, TPMLimit: 0}))
+}
+
+func TestBillingCacheService_CheckTPM_RedisErrorFailOpen(t *testing.T) {
+	cache := &userRPMCacheStub{tpmErr: errors.New("redis unavailable")}
+	svc := newBillingServiceForRPM(t, cache, nil)
+
+	require.NoError(t, svc.checkTPM(context.Background(), &User{ID: 1, TPMLimit: 1000}))
+}
+
+func TestBillingCacheService_RecordUserTPMUsage(t *testing.T) {
+	cache := &userRPMCacheStub{}
+	svc := newBillingServiceForRPM(t, cache, nil)
+
+	svc.RecordUserTPMUsage(context.Background(), 1, 123)
+	require.Equal(t, 123, cache.tpmAdded)
+	require.Equal(t, 123, cache.tpmUsed)
 }

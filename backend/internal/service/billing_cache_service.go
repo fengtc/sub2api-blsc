@@ -28,6 +28,7 @@ var (
 	// RPM 超限错误。gateway_handler 负责映射为 HTTP 429。
 	ErrGroupRPMExceeded = infraerrors.TooManyRequests("GROUP_RPM_EXCEEDED", "group requests-per-minute limit exceeded")
 	ErrUserRPMExceeded  = infraerrors.TooManyRequests("USER_RPM_EXCEEDED", "user requests-per-minute limit exceeded")
+	ErrUserTPMExceeded  = infraerrors.TooManyRequests("USER_TPM_EXCEEDED", "user tokens-per-minute limit exceeded")
 
 	// user × platform quota（HTTP 429 Too Many Requests + Retry-After header）。
 	// 选用 429 而非 403：限额耗尽属于"暂时性资源用尽，重试可恢复"的场景（RFC 6585），
@@ -768,12 +769,58 @@ func (s *BillingCacheService) CheckBillingEligibility(ctx context.Context, user 
 		}
 	}
 
+	// TPM 使用已结算的实际 Token；达到上限后拒绝本分钟内的后续请求。
+	if err := s.checkTPM(ctx, user); err != nil {
+		return err
+	}
+
 	// RPM 限流：级联回落（Override → Group → User），放在最后以避免为注定失败的请求增加计数。
 	if err := s.checkRPM(ctx, user, group); err != nil {
 		return err
 	}
 
 	return nil
+}
+
+// checkTPM 检查用户级全局 TPM。Redis 故障时 fail-open，避免缓存故障阻断网关。
+func (s *BillingCacheService) checkTPM(ctx context.Context, user *User) error {
+	if s == nil || s.userRPMCache == nil || user == nil || user.TPMLimit <= 0 {
+		return nil
+	}
+	used, err := s.userRPMCache.GetUserTPM(ctx, user.ID)
+	if err != nil {
+		logger.LegacyPrintf(
+			"service.billing_cache",
+			"Warning: tpm get failed for user=%d: %v",
+			user.ID, err,
+		)
+		return nil
+	}
+	if used >= user.TPMLimit {
+		return ErrUserTPMExceeded
+	}
+	return nil
+}
+
+// RecordUserTPMUsage 将一次已完成请求的实际 Token 用量计入用户当前分钟窗口。
+// Token 口径与 UsageLog.TotalTokens 一致：普通输入、输出、缓存创建、缓存读取互斥求和。
+func (s *BillingCacheService) RecordUserTPMUsage(ctx context.Context, userID int64, tokens int) {
+	if s == nil || s.userRPMCache == nil || userID <= 0 || tokens <= 0 {
+		return
+	}
+	baseCtx := context.Background()
+	if ctx != nil {
+		baseCtx = context.WithoutCancel(ctx)
+	}
+	cacheCtx, cancel := context.WithTimeout(baseCtx, 2*time.Second)
+	defer cancel()
+	if _, err := s.userRPMCache.AddUserTPM(cacheCtx, userID, tokens); err != nil {
+		logger.LegacyPrintf(
+			"service.billing_cache",
+			"Warning: tpm increment failed for user=%d tokens=%d: %v",
+			userID, tokens, err,
+		)
+	}
 }
 
 // checkRPM 执行并行 RPM 限流，所有适用的限制同时生效，任一超限即拒绝：

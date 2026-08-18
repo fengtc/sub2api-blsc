@@ -67,3 +67,20 @@ func TestAdminService_UpdateUser_NoInvalidateWhenRPMLimitUnchanged(t *testing.T)
 	require.NoError(t, err)
 	require.Empty(t, invalidator.userIDs, "只改 username 不应触发认证缓存失效")
 }
+
+func TestAdminService_UpdateUser_InvalidatesAuthCacheOnTPMLimitChange(t *testing.T) {
+	base := &userRepoStub{user: &User{ID: 42, Email: "u@example.com", TPMLimit: 10000}}
+	repo := &rpmUserRepoStub{userRepoStub: base}
+	invalidator := &authCacheInvalidatorStub{}
+	svc := &adminServiceImpl{
+		userRepo:             repo,
+		redeemCodeRepo:       &redeemRepoStub{},
+		authCacheInvalidator: invalidator,
+	}
+
+	newTPM := 120000
+	updated, err := svc.UpdateUser(context.Background(), 42, &UpdateUserInput{TPMLimit: &newTPM})
+	require.NoError(t, err)
+	require.Equal(t, 120000, updated.TPMLimit)
+	require.Equal(t, []int64{42}, invalidator.userIDs, "修改 TPMLimit 应立即失效 API Key 认证缓存")
+}

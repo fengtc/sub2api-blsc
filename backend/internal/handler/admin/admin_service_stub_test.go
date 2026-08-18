@@ -197,7 +197,7 @@ func (s *stubAdminService) BatchUpdateConcurrency(ctx context.Context, userIDs [
 	return len(userIDs), nil
 }
 
-func (s *stubAdminService) BatchUpdateLimits(ctx context.Context, userIDs []int64, concurrency, rpmLimit *int) (int, error) {
+func (s *stubAdminService) BatchUpdateLimits(ctx context.Context, userIDs []int64, concurrency, rpmLimit, tpmLimit *int) (int, error) {
 	return len(userIDs), nil
 }
 
@@ -217,6 +217,8 @@ func (s *stubAdminService) GetUserRPMStatus(ctx context.Context, userID int64) (
 	return &service.UserRPMStatus{
 		UserRPMUsed:  0,
 		UserRPMLimit: user.RPMLimit,
+		UserTPMUsed:  0,
+		UserTPMLimit: user.TPMLimit,
 	}, nil
 }
 

@@ -354,6 +354,20 @@ func (_c *UserCreate) SetNillableRpmLimit(v *int) *UserCreate {
 	return _c
 }
 
+// SetTpmLimit sets the "tpm_limit" field.
+func (_c *UserCreate) SetTpmLimit(v int) *UserCreate {
+	_c.mutation.SetTpmLimit(v)
+	return _c
+}
+
+// SetNillableTpmLimit sets the "tpm_limit" field if the given value is not nil.
+func (_c *UserCreate) SetNillableTpmLimit(v *int) *UserCreate {
+	if v != nil {
+		_c.SetTpmLimit(*v)
+	}
+	return _c
+}
+
 // AddAPIKeyIDs adds the "api_keys" edge to the APIKey entity by IDs.
 func (_c *UserCreate) AddAPIKeyIDs(ids ...int64) *UserCreate {
 	_c.mutation.AddAPIKeyIDs(ids...)
@@ -656,6 +670,10 @@ func (_c *UserCreate) defaults() error {
 		v := user.DefaultRpmLimit
 		_c.mutation.SetRpmLimit(v)
 	}
+	if _, ok := _c.mutation.TpmLimit(); !ok {
+		v := user.DefaultTpmLimit
+		_c.mutation.SetTpmLimit(v)
+	}
 	return nil
 }
 
@@ -744,6 +762,9 @@ func (_c *UserCreate) check() error {
 	}
 	if _, ok := _c.mutation.RpmLimit(); !ok {
 		return &ValidationError{Name: "rpm_limit", err: errors.New(`ent: missing required field "User.rpm_limit"`)}
+	}
+	if _, ok := _c.mutation.TpmLimit(); !ok {
+		return &ValidationError{Name: "tpm_limit", err: errors.New(`ent: missing required field "User.tpm_limit"`)}
 	}
 	return nil
 }
@@ -867,6 +888,10 @@ func (_c *UserCreate) createSpec() (*User, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.RpmLimit(); ok {
 		_spec.SetField(user.FieldRpmLimit, field.TypeInt, value)
 		_node.RpmLimit = value
+	}
+	if value, ok := _c.mutation.TpmLimit(); ok {
+		_spec.SetField(user.FieldTpmLimit, field.TypeInt, value)
+		_node.TpmLimit = value
 	}
 	if nodes := _c.mutation.APIKeysIDs(); len(nodes) > 0 {
 		edge := &sqlgraph.EdgeSpec{
@@ -1480,6 +1505,24 @@ func (u *UserUpsert) AddRpmLimit(v int) *UserUpsert {
 	return u
 }
 
+// SetTpmLimit sets the "tpm_limit" field.
+func (u *UserUpsert) SetTpmLimit(v int) *UserUpsert {
+	u.Set(user.FieldTpmLimit, v)
+	return u
+}
+
+// UpdateTpmLimit sets the "tpm_limit" field to the value that was provided on create.
+func (u *UserUpsert) UpdateTpmLimit() *UserUpsert {
+	u.SetExcluded(user.FieldTpmLimit)
+	return u
+}
+
+// AddTpmLimit adds v to the "tpm_limit" field.
+func (u *UserUpsert) AddTpmLimit(v int) *UserUpsert {
+	u.Add(user.FieldTpmLimit, v)
+	return u
+}
+
 // UpdateNewValues updates the mutable fields using the new values that were set on create.
 // Using this option is equivalent to using:
 //
@@ -1928,6 +1971,27 @@ func (u *UserUpsertOne) AddRpmLimit(v int) *UserUpsertOne {
 func (u *UserUpsertOne) UpdateRpmLimit() *UserUpsertOne {
 	return u.Update(func(s *UserUpsert) {
 		s.UpdateRpmLimit()
+	})
+}
+
+// SetTpmLimit sets the "tpm_limit" field.
+func (u *UserUpsertOne) SetTpmLimit(v int) *UserUpsertOne {
+	return u.Update(func(s *UserUpsert) {
+		s.SetTpmLimit(v)
+	})
+}
+
+// AddTpmLimit adds v to the "tpm_limit" field.
+func (u *UserUpsertOne) AddTpmLimit(v int) *UserUpsertOne {
+	return u.Update(func(s *UserUpsert) {
+		s.AddTpmLimit(v)
+	})
+}
+
+// UpdateTpmLimit sets the "tpm_limit" field to the value that was provided on create.
+func (u *UserUpsertOne) UpdateTpmLimit() *UserUpsertOne {
+	return u.Update(func(s *UserUpsert) {
+		s.UpdateTpmLimit()
 	})
 }
 
@@ -2545,6 +2609,27 @@ func (u *UserUpsertBulk) AddRpmLimit(v int) *UserUpsertBulk {
 func (u *UserUpsertBulk) UpdateRpmLimit() *UserUpsertBulk {
 	return u.Update(func(s *UserUpsert) {
 		s.UpdateRpmLimit()
+	})
+}
+
+// SetTpmLimit sets the "tpm_limit" field.
+func (u *UserUpsertBulk) SetTpmLimit(v int) *UserUpsertBulk {
+	return u.Update(func(s *UserUpsert) {
+		s.SetTpmLimit(v)
+	})
+}
+
+// AddTpmLimit adds v to the "tpm_limit" field.
+func (u *UserUpsertBulk) AddTpmLimit(v int) *UserUpsertBulk {
+	return u.Update(func(s *UserUpsert) {
+		s.AddTpmLimit(v)
+	})
+}
+
+// UpdateTpmLimit sets the "tpm_limit" field to the value that was provided on create.
+func (u *UserUpsertBulk) UpdateTpmLimit() *UserUpsertBulk {
+	return u.Update(func(s *UserUpsert) {
+		s.UpdateTpmLimit()
 	})
 }
 

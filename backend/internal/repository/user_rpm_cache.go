@@ -20,6 +20,7 @@ import (
 const (
 	userGroupRPMKeyPrefix = "rpm:ug:"
 	userRPMKeyPrefix      = "rpm:u:"
+	userTPMKeyPrefix      = "tpm:u:"
 
 	userRPMKeyTTL = 120 * time.Second
 )
@@ -49,6 +50,17 @@ func (c *userRPMCacheImpl) atomicIncr(ctx context.Context, key string) (int, err
 	pipe.Expire(ctx, key, userRPMKeyTTL)
 	if _, err := pipe.Exec(ctx); err != nil {
 		return 0, fmt.Errorf("user rpm increment: %w", err)
+	}
+	return int(incr.Val()), nil
+}
+
+// atomicIncrBy 原子 INCRBY+EXPIRE，用于 Token 计数。
+func (c *userRPMCacheImpl) atomicIncrBy(ctx context.Context, key string, delta int) (int, error) {
+	pipe := c.rdb.TxPipeline()
+	incr := pipe.IncrBy(ctx, key, int64(delta))
+	pipe.Expire(ctx, key, userRPMKeyTTL)
+	if _, err := pipe.Exec(ctx); err != nil {
+		return 0, fmt.Errorf("user tpm increment: %w", err)
 	}
 	return int(incr.Val()), nil
 }
@@ -103,6 +115,36 @@ func (c *userRPMCacheImpl) GetUserRPM(ctx context.Context, userID int64) (int, e
 	}
 	if err != nil {
 		return 0, fmt.Errorf("user rpm get: %w", err)
+	}
+	return val, nil
+}
+
+// AddUserTPM 累加用户当前分钟的实际 Token 用量。
+func (c *userRPMCacheImpl) AddUserTPM(ctx context.Context, userID int64, tokens int) (int, error) {
+	if tokens <= 0 {
+		return c.GetUserTPM(ctx, userID)
+	}
+	minute, err := c.minuteTS(ctx)
+	if err != nil {
+		return 0, err
+	}
+	key := fmt.Sprintf("%s%d:%d", userTPMKeyPrefix, userID, minute)
+	return c.atomicIncrBy(ctx, key, tokens)
+}
+
+// GetUserTPM 获取用户当前分钟的实际 Token 用量。
+func (c *userRPMCacheImpl) GetUserTPM(ctx context.Context, userID int64) (int, error) {
+	minute, err := c.minuteTS(ctx)
+	if err != nil {
+		return 0, err
+	}
+	key := fmt.Sprintf("%s%d:%d", userTPMKeyPrefix, userID, minute)
+	val, err := c.rdb.Get(ctx, key).Int()
+	if err == redis.Nil {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, fmt.Errorf("user tpm get: %w", err)
 	}
 	return val, nil
 }

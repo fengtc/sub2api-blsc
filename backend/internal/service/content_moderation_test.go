@@ -261,7 +261,7 @@ func (r *contentModerationTestUserRepo) BatchSetConcurrency(ctx context.Context,
 func (r *contentModerationTestUserRepo) BatchAddConcurrency(ctx context.Context, userIDs []int64, delta int) (int, error) {
 	panic("unexpected BatchAddConcurrency call")
 }
-func (r *contentModerationTestUserRepo) BatchUpdateLimits(ctx context.Context, userIDs []int64, concurrency, rpmLimit *int) (int, error) {
+func (r *contentModerationTestUserRepo) BatchUpdateLimits(ctx context.Context, userIDs []int64, concurrency, rpmLimit, tpmLimit *int) (int, error) {
 	panic("unexpected BatchUpdateLimits call")
 }
 

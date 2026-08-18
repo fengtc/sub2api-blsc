@@ -444,6 +444,7 @@ export default {
         selectUser: '选择 {email}',
         enableConcurrency: '修改并发数',
         enableRPMLimit: '修改 RPM 限制',
+        enableTPMLimit: '修改 TPM 限制',
         unlimited: '不限制',
         nonNegativeInteger: '请输入非负整数。',
         apply: '应用限制',
@@ -451,6 +452,8 @@ export default {
         concurrencyValue: '并发数：{value}',
         rpmValue: 'RPM：{value}',
         rpmUnlimitedValue: 'RPM：不限制',
+        tpmValue: 'TPM：{value}',
+        tpmUnlimitedValue: 'TPM：不限制',
         confirm: '确定覆盖 {count} 个用户的限制吗？\n{fields}',
         success: '已更新 {count} 个用户的限制',
         failed: '批量更新用户限制失败'
@@ -513,6 +516,7 @@ export default {
         usageGemini: '用量 (Gemini)',
         usageAntigravity: '用量 (Antigravity)',
         concurrency: '并发数',
+        tpmLimit: 'TPM 限制',
         status: '状态',
         lastActive: '最后活跃时间',
         lastUsed: '最后使用时间',
@@ -579,7 +583,10 @@ export default {
         selectStatus: '选择状态',
         rpmLimit: '每分钟请求数 (RPM)',
         rpmLimitPlaceholder: '0 表示不限制',
-        rpmLimitHint: '该用户每分钟最大请求数，0 = 不限制；仅在所用分组未设置 rpm_limit 时作为兜底生效'
+        rpmLimitHint: '该用户每分钟最大请求数，0 = 不限制；仅在所用分组未设置 rpm_limit 时作为兜底生效',
+        tpmLimit: '每分钟 Token 数 (TPM)',
+        tpmLimitPlaceholder: '0 表示不限制',
+        tpmLimitHint: '该用户所有 API Key、模型和分组每分钟实际 Token 总量上限，0 = 不限制'
       },
       adjustBalance: '调整余额',
       adjustConcurrency: '调整并发数',

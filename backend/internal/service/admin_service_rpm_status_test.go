@@ -49,6 +49,7 @@ func (s *rpmStatusRateRepoStub) GetRPMOverrideByUserAndGroup(_ context.Context, 
 type rpmStatusCacheStub struct {
 	UserRPMCache
 	userUsed  int
+	tokenUsed int
 	groupUsed map[int64]int
 }
 
@@ -66,6 +67,14 @@ func (s *rpmStatusCacheStub) GetUserGroupRPM(_ context.Context, _, groupID int64
 
 func (s *rpmStatusCacheStub) GetUserRPM(context.Context, int64) (int, error) {
 	return s.userUsed, nil
+}
+
+func (s *rpmStatusCacheStub) AddUserTPM(_ context.Context, _ int64, tokens int) (int, error) {
+	return tokens, nil
+}
+
+func (s *rpmStatusCacheStub) GetUserTPM(context.Context, int64) (int, error) {
+	return s.tokenUsed, nil
 }
 
 func TestAdminService_GetUserRPMStatus_AggregatesUserAndGroupLimits(t *testing.T) {

@@ -84,7 +84,7 @@ func (s *UserRepoSuite) TestUpdate_DoesNotRevertConcurrentLimitChanges() {
 	s.Require().NoError(err, "GetByID")
 
 	concurrency, rpmLimit := 9, 90
-	affected, err := s.repo.BatchUpdateLimits(s.ctx, []int64{user.ID}, &concurrency, &rpmLimit)
+	affected, err := s.repo.BatchUpdateLimits(s.ctx, []int64{user.ID}, &concurrency, &rpmLimit, nil)
 	s.Require().NoError(err, "BatchUpdateLimits")
 	s.Require().Equal(1, affected)
 

@@ -432,6 +432,27 @@ func (_u *UserUpdate) AddRpmLimit(v int) *UserUpdate {
 	return _u
 }
 
+// SetTpmLimit sets the "tpm_limit" field.
+func (_u *UserUpdate) SetTpmLimit(v int) *UserUpdate {
+	_u.mutation.ResetTpmLimit()
+	_u.mutation.SetTpmLimit(v)
+	return _u
+}
+
+// SetNillableTpmLimit sets the "tpm_limit" field if the given value is not nil.
+func (_u *UserUpdate) SetNillableTpmLimit(v *int) *UserUpdate {
+	if v != nil {
+		_u.SetTpmLimit(*v)
+	}
+	return _u
+}
+
+// AddTpmLimit adds value to the "tpm_limit" field.
+func (_u *UserUpdate) AddTpmLimit(v int) *UserUpdate {
+	_u.mutation.AddTpmLimit(v)
+	return _u
+}
+
 // AddAPIKeyIDs adds the "api_keys" edge to the APIKey entity by IDs.
 func (_u *UserUpdate) AddAPIKeyIDs(ids ...int64) *UserUpdate {
 	_u.mutation.AddAPIKeyIDs(ids...)
@@ -1098,6 +1119,12 @@ func (_u *UserUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if value, ok := _u.mutation.AddedRpmLimit(); ok {
 		_spec.AddField(user.FieldRpmLimit, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.TpmLimit(); ok {
+		_spec.SetField(user.FieldTpmLimit, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedTpmLimit(); ok {
+		_spec.AddField(user.FieldTpmLimit, field.TypeInt, value)
 	}
 	if _u.mutation.APIKeysCleared() {
 		edge := &sqlgraph.EdgeSpec{
@@ -2108,6 +2135,27 @@ func (_u *UserUpdateOne) AddRpmLimit(v int) *UserUpdateOne {
 	return _u
 }
 
+// SetTpmLimit sets the "tpm_limit" field.
+func (_u *UserUpdateOne) SetTpmLimit(v int) *UserUpdateOne {
+	_u.mutation.ResetTpmLimit()
+	_u.mutation.SetTpmLimit(v)
+	return _u
+}
+
+// SetNillableTpmLimit sets the "tpm_limit" field if the given value is not nil.
+func (_u *UserUpdateOne) SetNillableTpmLimit(v *int) *UserUpdateOne {
+	if v != nil {
+		_u.SetTpmLimit(*v)
+	}
+	return _u
+}
+
+// AddTpmLimit adds value to the "tpm_limit" field.
+func (_u *UserUpdateOne) AddTpmLimit(v int) *UserUpdateOne {
+	_u.mutation.AddTpmLimit(v)
+	return _u
+}
+
 // AddAPIKeyIDs adds the "api_keys" edge to the APIKey entity by IDs.
 func (_u *UserUpdateOne) AddAPIKeyIDs(ids ...int64) *UserUpdateOne {
 	_u.mutation.AddAPIKeyIDs(ids...)
@@ -2804,6 +2852,12 @@ func (_u *UserUpdateOne) sqlSave(ctx context.Context) (_node *User, err error) {
 	}
 	if value, ok := _u.mutation.AddedRpmLimit(); ok {
 		_spec.AddField(user.FieldRpmLimit, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.TpmLimit(); ok {
+		_spec.SetField(user.FieldTpmLimit, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedTpmLimit(); ok {
+		_spec.AddField(user.FieldTpmLimit, field.TypeInt, value)
 	}
 	if _u.mutation.APIKeysCleared() {
 		edge := &sqlgraph.EdgeSpec{

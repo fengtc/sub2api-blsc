@@ -49,6 +49,7 @@ export interface BatchUpdateUserLimitsRequest {
   all?: boolean
   concurrency?: number
   rpm_limit?: number
+  tpm_limit?: number
 }
 
 export interface BatchUpdateUserLimitsResponse {
@@ -136,6 +137,7 @@ export async function create(userData: {
   balance?: number
   concurrency?: number
   rpm_limit?: number
+  tpm_limit?: number
   allowed_groups?: number[] | null
 }): Promise<AdminUser> {
   const { data } = await apiClient.post<AdminUser>('/admin/users', userData)

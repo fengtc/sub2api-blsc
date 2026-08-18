@@ -29,6 +29,13 @@
         <label class="input-label">{{ t('admin.users.username') }}</label>
         <input v-model="form.username" type="text" class="input" />
       </div>
+      <div data-test="user-department-field">
+        <UserAttributeForm
+          v-model="form.customAttributes"
+          :user-id="user?.id"
+          :include-keys="departmentAttributeKeys"
+        />
+      </div>
       <div>
         <label class="input-label">{{ t('admin.users.form.roleLabel') }}</label>
         <select v-model="form.role" class="input">
@@ -44,19 +51,37 @@
         <label class="input-label">{{ t('admin.users.columns.concurrency') }}</label>
         <input v-model.number="form.concurrency" type="number" class="input" />
       </div>
-      <div>
-        <label class="input-label">{{ t('admin.users.form.rpmLimit') }}</label>
-        <input
-          v-model.number="form.rpm_limit"
-          type="number"
-          min="0"
-          step="1"
-          class="input"
-          :placeholder="t('admin.users.form.rpmLimitPlaceholder')"
-        />
-        <p class="input-hint">{{ t('admin.users.form.rpmLimitHint') }}</p>
+      <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <div>
+          <label class="input-label">{{ t('admin.users.form.rpmLimit') }}</label>
+          <input
+            v-model.number="form.rpm_limit"
+            type="number"
+            min="0"
+            step="1"
+            class="input"
+            :placeholder="t('admin.users.form.rpmLimitPlaceholder')"
+          />
+          <p class="input-hint">{{ t('admin.users.form.rpmLimitHint') }}</p>
+        </div>
+        <div>
+          <label class="input-label">{{ t('admin.users.form.tpmLimit') }}</label>
+          <input
+            v-model.number="form.tpm_limit"
+            type="number"
+            min="0"
+            step="1"
+            class="input"
+            :placeholder="t('admin.users.form.tpmLimitPlaceholder')"
+          />
+          <p class="input-hint">{{ t('admin.users.form.tpmLimitHint') }}</p>
+        </div>
       </div>
-      <UserAttributeForm v-model="form.customAttributes" :user-id="user?.id" />
+      <UserAttributeForm
+        v-model="form.customAttributes"
+        :user-id="user?.id"
+        :exclude-keys="departmentAttributeKeys"
+      />
     </form>
     <template #footer>
       <div class="flex justify-end gap-3">
@@ -90,11 +115,12 @@ const emit = defineEmits(['close', 'success'])
 const { t } = useI18n(); const appStore = useAppStore(); const { copyToClipboard } = useClipboard()
 
 const submitting = ref(false); const passwordCopied = ref(false)
-const form = reactive({ email: '', password: '', username: '', notes: '', role: 'user', concurrency: 1, rpm_limit: 0, customAttributes: {} as UserAttributeValuesMap })
+const departmentAttributeKeys = ['department']
+const form = reactive({ email: '', password: '', username: '', notes: '', role: 'user', concurrency: 1, rpm_limit: 0, tpm_limit: 0, customAttributes: {} as UserAttributeValuesMap })
 
 watch(() => props.user, (u) => {
   if (u) {
-    Object.assign(form, { email: u.email, password: '', username: u.username || '', notes: u.notes || '', role: u.role || 'user', concurrency: u.concurrency, rpm_limit: u.rpm_limit ?? 0, customAttributes: {} })
+    Object.assign(form, { email: u.email, password: '', username: u.username || '', notes: u.notes || '', role: u.role || 'user', concurrency: u.concurrency, rpm_limit: u.rpm_limit ?? 0, tpm_limit: u.tpm_limit ?? 0, customAttributes: {} })
     passwordCopied.value = false
   }
 }, { immediate: true })
@@ -124,7 +150,7 @@ const handleUpdateUser = async () => {
   const userId = props.user.id
   submitting.value = true
   try {
-    const data: any = { email: form.email, username: form.username, notes: form.notes, role: form.role, concurrency: form.concurrency, rpm_limit: form.rpm_limit }
+    const data: any = { email: form.email, username: form.username, notes: form.notes, role: form.role, concurrency: form.concurrency, rpm_limit: form.rpm_limit, tpm_limit: form.tpm_limit }
     if (form.password.trim()) data.password = form.password.trim()
     // 提升为管理员属敏感操作：后端返回 STEP_UP_REQUIRED 时弹 TOTP 验证并重试
     await stepUp.run(() => adminAPI.users.update(userId, data))

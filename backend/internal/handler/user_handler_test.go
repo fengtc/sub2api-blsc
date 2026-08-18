@@ -104,7 +104,7 @@ func (s *userHandlerRepoStub) SetBalance(ctx context.Context, id int64, value fl
 func (s *userHandlerRepoStub) BatchAddConcurrency(context.Context, []int64, int) (int, error) {
 	return 0, nil
 }
-func (s *userHandlerRepoStub) BatchUpdateLimits(context.Context, []int64, *int, *int) (int, error) {
+func (s *userHandlerRepoStub) BatchUpdateLimits(context.Context, []int64, *int, *int, *int) (int, error) {
 	return 0, nil
 }
 func (s *userHandlerRepoStub) ExistsByEmail(context.Context, string) (bool, error) { return false, nil }

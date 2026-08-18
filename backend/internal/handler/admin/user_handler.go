@@ -67,6 +67,7 @@ type CreateUserRequest struct {
 	Balance       *float64 `json:"balance"`
 	Concurrency   int      `json:"concurrency"`
 	RPMLimit      int      `json:"rpm_limit"`
+	TPMLimit      int      `json:"tpm_limit" binding:"min=0"`
 	AllowedGroups []int64  `json:"allowed_groups"`
 }
 
@@ -81,6 +82,7 @@ type UpdateUserRequest struct {
 	Balance       *float64 `json:"balance"`
 	Concurrency   *int     `json:"concurrency"`
 	RPMLimit      *int     `json:"rpm_limit"`
+	TPMLimit      *int     `json:"tpm_limit" binding:"omitempty,min=0"`
 	Status        string   `json:"status" binding:"omitempty,oneof=active disabled"`
 	AllowedGroups *[]int64 `json:"allowed_groups"`
 	// GroupRates 用户专属分组倍率配置
@@ -292,6 +294,7 @@ func (h *UserHandler) Create(c *gin.Context) {
 		Balance:       req.Balance,
 		Concurrency:   req.Concurrency,
 		RPMLimit:      req.RPMLimit,
+		TPMLimit:      req.TPMLimit,
 		AllowedGroups: req.AllowedGroups,
 		ActorAdminID:  getAdminIDFromContext(c),
 	})
@@ -350,6 +353,7 @@ func (h *UserHandler) Update(c *gin.Context) {
 		Balance:       req.Balance,
 		Concurrency:   req.Concurrency,
 		RPMLimit:      req.RPMLimit,
+		TPMLimit:      req.TPMLimit,
 		Status:        req.Status,
 		AllowedGroups: req.AllowedGroups,
 		GroupRates:    req.GroupRates,
@@ -616,6 +620,7 @@ type BatchUpdateLimitsRequest struct {
 	All         bool    `json:"all"`
 	Concurrency *int    `json:"concurrency" binding:"omitempty,min=0"`
 	RPMLimit    *int    `json:"rpm_limit" binding:"omitempty,min=0"`
+	TPMLimit    *int    `json:"tpm_limit" binding:"omitempty,min=0"`
 }
 
 func (h *UserHandler) BatchUpdateLimits(c *gin.Context) {
@@ -624,8 +629,8 @@ func (h *UserHandler) BatchUpdateLimits(c *gin.Context) {
 		response.BadRequest(c, "Invalid request: "+err.Error())
 		return
 	}
-	if req.Concurrency == nil && req.RPMLimit == nil {
-		response.BadRequest(c, "at least one of concurrency or rpm_limit is required")
+	if req.Concurrency == nil && req.RPMLimit == nil && req.TPMLimit == nil {
+		response.BadRequest(c, "at least one of concurrency, rpm_limit or tpm_limit is required")
 		return
 	}
 	if !req.All && len(req.UserIDs) == 0 {
@@ -668,6 +673,7 @@ func (h *UserHandler) BatchUpdateLimits(c *gin.Context) {
 		userIDs,
 		req.Concurrency,
 		req.RPMLimit,
+		req.TPMLimit,
 	)
 	if err != nil {
 		response.ErrorFrom(c, err)

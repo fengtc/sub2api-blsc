@@ -22,4 +22,10 @@ type UserRPMCache interface {
 
 	// GetUserRPM 获取用户当前分钟已用 RPM（只读，不递增）。
 	GetUserRPM(ctx context.Context, userID int64) (count int, err error)
+
+	// AddUserTPM 将实际消耗的 Token 原子累加到用户级分钟窗口并返回最新值。
+	AddUserTPM(ctx context.Context, userID int64, tokens int) (count int, err error)
+
+	// GetUserTPM 获取用户当前分钟已消耗的 Token 数（只读）。
+	GetUserTPM(ctx context.Context, userID int64) (count int, err error)
 }

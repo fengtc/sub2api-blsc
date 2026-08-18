@@ -118,6 +118,9 @@ func normalizeUserRole(role, fallback string) (string, error) {
 }
 
 func (s *adminServiceImpl) CreateUser(ctx context.Context, input *CreateUserInput) (*User, error) {
+	if input.TPMLimit < 0 {
+		return nil, fmt.Errorf("tpm_limit must be non-negative")
+	}
 	balance := 0.0
 	if input.Balance != nil {
 		balance = *input.Balance
@@ -139,6 +142,7 @@ func (s *adminServiceImpl) CreateUser(ctx context.Context, input *CreateUserInpu
 		Balance:       balance,
 		Concurrency:   input.Concurrency,
 		RPMLimit:      input.RPMLimit,
+		TPMLimit:      input.TPMLimit,
 		Status:        StatusActive,
 		AllowedGroups: input.AllowedGroups,
 	}
@@ -193,6 +197,9 @@ func (s *adminServiceImpl) assignDefaultSubscriptions(ctx context.Context, userI
 }
 
 func (s *adminServiceImpl) UpdateUser(ctx context.Context, id int64, input *UpdateUserInput) (*User, error) {
+	if input.TPMLimit != nil && *input.TPMLimit < 0 {
+		return nil, fmt.Errorf("tpm_limit must be non-negative")
+	}
 	// 校验用户专属分组倍率：必须 > 0（nil 合法，表示清除专属倍率）
 	if input.GroupRates != nil {
 		for groupID, rate := range input.GroupRates {
@@ -216,6 +223,7 @@ func (s *adminServiceImpl) UpdateUser(ctx context.Context, id int64, input *Upda
 	oldStatus := user.Status
 	oldRole := user.Role
 	oldRPMLimit := user.RPMLimit
+	oldTPMLimit := user.TPMLimit
 	oldAllowedGroups := append([]int64(nil), user.AllowedGroups...)
 
 	// fields 与下面的 input.X 判空条件一一对应：管理员没提交的列不写回，
@@ -274,6 +282,11 @@ func (s *adminServiceImpl) UpdateUser(ctx context.Context, id int64, input *Upda
 		fields.RPMLimit = true
 	}
 
+	if input.TPMLimit != nil {
+		user.TPMLimit = *input.TPMLimit
+		fields.TPMLimit = true
+	}
+
 	if input.AllowedGroups != nil {
 		user.AllowedGroups = *input.AllowedGroups
 		fields.AllowedGroups = true
@@ -299,7 +312,7 @@ func (s *adminServiceImpl) UpdateUser(ctx context.Context, id int64, input *Upda
 	if s.authCacheInvalidator != nil {
 		// RPMLimit 直接参与 billing_cache_service.checkRPM 的三级级联，
 		// allowed_groups 参与 API Key 专属分组授权判断；不失效缓存会让修改在一个 L2 TTL 内失去效果。
-		if user.Concurrency != oldConcurrency || user.Status != oldStatus || user.Role != oldRole || user.RPMLimit != oldRPMLimit || !sameInt64Set(user.AllowedGroups, oldAllowedGroups) {
+		if user.Concurrency != oldConcurrency || user.Status != oldStatus || user.Role != oldRole || user.RPMLimit != oldRPMLimit || user.TPMLimit != oldTPMLimit || !sameInt64Set(user.AllowedGroups, oldAllowedGroups) {
 			s.authCacheInvalidator.InvalidateAuthCacheByUserID(ctx, user.ID)
 		}
 	}
@@ -472,9 +485,9 @@ func (s *adminServiceImpl) BatchUpdateConcurrency(ctx context.Context, userIDs [
 	return affected, nil
 }
 
-func (s *adminServiceImpl) BatchUpdateLimits(ctx context.Context, userIDs []int64, concurrency, rpmLimit *int) (int, error) {
-	if concurrency == nil && rpmLimit == nil {
-		return 0, fmt.Errorf("at least one of concurrency or rpm_limit is required")
+func (s *adminServiceImpl) BatchUpdateLimits(ctx context.Context, userIDs []int64, concurrency, rpmLimit, tpmLimit *int) (int, error) {
+	if concurrency == nil && rpmLimit == nil && tpmLimit == nil {
+		return 0, fmt.Errorf("at least one of concurrency, rpm_limit or tpm_limit is required")
 	}
 
 	cleaned := make([]int64, 0, len(userIDs))
@@ -493,7 +506,7 @@ func (s *adminServiceImpl) BatchUpdateLimits(ctx context.Context, userIDs []int6
 		return 0, nil
 	}
 
-	affected, err := s.userRepo.BatchUpdateLimits(ctx, cleaned, concurrency, rpmLimit)
+	affected, err := s.userRepo.BatchUpdateLimits(ctx, cleaned, concurrency, rpmLimit, tpmLimit)
 	if err != nil {
 		return 0, err
 	}
@@ -616,6 +629,10 @@ func (s *adminServiceImpl) GetUserRPMStatus(ctx context.Context, userID int64) (
 	if err != nil {
 		logger.LegacyPrintf("service.admin", "failed to get user rpm: user_id=%d err=%v", userID, err)
 	}
+	userTPMUsed, err := s.userRPMCache.GetUserTPM(ctx, userID)
+	if err != nil {
+		logger.LegacyPrintf("service.admin", "failed to get user tpm: user_id=%d err=%v", userID, err)
+	}
 
 	keys, _, err := s.GetUserAPIKeys(ctx, userID, 1, 1000, "", "")
 	if err != nil {
@@ -673,6 +690,8 @@ func (s *adminServiceImpl) GetUserRPMStatus(ctx context.Context, userID int64) (
 	return &UserRPMStatus{
 		UserRPMUsed:  userRPMUsed,
 		UserRPMLimit: user.RPMLimit,
+		UserTPMUsed:  userTPMUsed,
+		UserTPMLimit: user.TPMLimit,
 		PerGroup:     perGroup,
 	}, nil
 }
