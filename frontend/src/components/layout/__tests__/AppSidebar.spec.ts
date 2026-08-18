@@ -60,3 +60,12 @@ describe('AppSidebar model plaza navigation', () => {
     expect(componentSource).not.toContain("t('nav.modelPlaza')")
   })
 })
+
+describe('AppSidebar hidden commercial-code navigation', () => {
+  it('keeps redeem-code and promo-code management out of the left sidebar', () => {
+    expect(componentSource).not.toContain("path: '/admin/redeem'")
+    expect(componentSource).not.toContain("path: '/admin/promo-codes'")
+    expect(componentSource).not.toContain("t('nav.redeemCodes')")
+    expect(componentSource).not.toContain("t('nav.promoCodes')")
+  })
+})
