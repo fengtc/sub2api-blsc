@@ -569,7 +569,7 @@ func (s *PricingService) mergeFallbackPricingData(data map[string]*LiteLLMModelP
 	overridden := 0
 	for modelName, pricing := range fallbackData {
 		_, exists := data[modelName]
-		// codex-auto-review uses Sub2API's evidence-based bundled rate as the
+		// codex-auto-review uses paragateway's evidence-based bundled rate as the
 		// authoritative source. The remote catalog can lag this dedicated model
 		// and otherwise silently restore its obsolete public-model pricing.
 		if exists && modelName != "codex-auto-review" {

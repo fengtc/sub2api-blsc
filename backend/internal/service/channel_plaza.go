@@ -8,7 +8,7 @@ import (
 )
 
 // PlazaOfficialPricing 模型广场展示用的全局参考价（USD per token）。
-// 动态价格源未覆盖时会使用 Sub2API 的内置计费兜底价；字段为 nil 表示缺失。
+// 动态价格源未覆盖时会使用 paragateway 的内置计费兜底价；字段为 nil 表示缺失。
 type PlazaOfficialPricing struct {
 	InputPrice        *float64
 	OutputPrice       *float64

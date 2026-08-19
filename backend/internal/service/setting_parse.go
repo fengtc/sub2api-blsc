@@ -23,8 +23,8 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 	// 检查是否已有设置
 	_, err := s.settingRepo.GetValue(ctx, SettingKeyRegistrationEnabled)
 	if err == nil {
-		// 已有设置，不需要初始化
-		return nil
+		// 已有设置时也迁移官方默认品牌，避免升级或复制到其他主机后恢复旧名称。
+		return s.migrateLegacyBrandSettings(ctx)
 	}
 	if !errors.Is(err, ErrSettingNotFound) {
 		return fmt.Errorf("check existing settings: %w", err)
@@ -67,8 +67,9 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 		SettingKeyAPIKeyACLTrustForwardedIP:                 "true",
 		SettingKeyForwardedClientIPHeaders:                  string(forwardedClientIPHeadersJSON),
 		settingKeyForwardedClientIPModeV2:                   "true",
-		SettingKeySiteName:                                  "Sub2API",
+		SettingKeySiteName:                                  "paragateway",
 		SettingKeySiteLogo:                                  "",
+		SettingKeySiteSubtitle:                              "AI API Gateway Platform",
 		SettingKeyPurchaseSubscriptionEnabled:               "false",
 		SettingKeyPurchaseSubscriptionURL:                   "",
 		SettingKeyTableDefaultPageSize:                      "20",
@@ -265,6 +266,28 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 	return s.settingRepo.SetMultiple(ctx, defaults)
 }
 
+// migrateLegacyBrandSettings only replaces the upstream defaults. Explicit OEM
+// names and subtitles are preserved.
+func (s *SettingService) migrateLegacyBrandSettings(ctx context.Context) error {
+	if siteName, err := s.settingRepo.GetValue(ctx, SettingKeySiteName); err == nil {
+		legacyOfficialSiteName := "sub2" + "api"
+		if strings.EqualFold(strings.TrimSpace(siteName), legacyOfficialSiteName) {
+			if err := s.settingRepo.Set(ctx, SettingKeySiteName, "paragateway"); err != nil {
+				return fmt.Errorf("migrate legacy site name: %w", err)
+			}
+		}
+	}
+
+	if subtitle, err := s.settingRepo.GetValue(ctx, SettingKeySiteSubtitle); err == nil {
+		if strings.TrimSpace(subtitle) == "Subscription to API Conversion Platform" {
+			if err := s.settingRepo.Set(ctx, SettingKeySiteSubtitle, "AI API Gateway Platform"); err != nil {
+				return fmt.Errorf("migrate legacy site subtitle: %w", err)
+			}
+		}
+	}
+	return nil
+}
+
 func parseForwardedClientIPHeadersSetting(value string) ([]string, error) {
 	var headers []string
 	if err := json.Unmarshal([]byte(value), &headers); err != nil {
@@ -349,9 +372,9 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 		AliyunCaptchaRegion:                    normalizeAliyunCaptchaRegion(settings[SettingKeyAliyunCaptchaRegion]),
 		APIKeyACLTrustForwardedIP:              apiKeyACLTrustForwardedIP,
 		ForwardedClientIPHeaders:               forwardedClientIPHeaders,
-		SiteName:                               s.getStringOrDefault(settings, SettingKeySiteName, "Sub2API"),
+		SiteName:                               s.getStringOrDefault(settings, SettingKeySiteName, "paragateway"),
 		SiteLogo:                               settings[SettingKeySiteLogo],
-		SiteSubtitle:                           s.getStringOrDefault(settings, SettingKeySiteSubtitle, "Subscription to API Conversion Platform"),
+		SiteSubtitle:                           s.getStringOrDefault(settings, SettingKeySiteSubtitle, "AI API Gateway Platform"),
 		APIBaseURL:                             settings[SettingKeyAPIBaseURL],
 		ContactInfo:                            settings[SettingKeyContactInfo],
 		DocURL:                                 settings[SettingKeyDocURL],

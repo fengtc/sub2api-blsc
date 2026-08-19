@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import enMisc from '../locales/en/misc'
 import zhMisc from '../locales/zh/misc'
 
-const legacyBrand = /Sub2API/
+const legacyBrand = /paragateway/
 
 describe('onboarding branding', () => {
   it('uses the Para AICoding Gateway brand in Chinese onboarding', () => {

@@ -17,7 +17,7 @@ func TestValidateWebAuthnConfig(t *testing.T) {
 			configure: func(cfg *Config) {
 				cfg.WebAuthn = WebAuthnConfig{
 					Enabled:       true,
-					RPDisplayName: "Sub2API",
+					RPDisplayName: "paragateway",
 					RPID:          "sub2api.example.com",
 					RPOrigins:     []string{"https://sub2api.example.com"},
 				}
@@ -28,7 +28,7 @@ func TestValidateWebAuthnConfig(t *testing.T) {
 			configure: func(cfg *Config) {
 				cfg.WebAuthn = WebAuthnConfig{
 					Enabled:       true,
-					RPDisplayName: "Sub2API Dev",
+					RPDisplayName: "paragateway Dev",
 					RPID:          "localhost",
 					RPOrigins:     []string{"http://localhost:5173"},
 				}
@@ -39,7 +39,7 @@ func TestValidateWebAuthnConfig(t *testing.T) {
 			configure: func(cfg *Config) {
 				cfg.WebAuthn = WebAuthnConfig{
 					Enabled:       true,
-					RPDisplayName: "Sub2API",
+					RPDisplayName: "paragateway",
 					RPOrigins:     []string{"https://sub2api.example.com"},
 				}
 			},
@@ -50,7 +50,7 @@ func TestValidateWebAuthnConfig(t *testing.T) {
 			configure: func(cfg *Config) {
 				cfg.WebAuthn = WebAuthnConfig{
 					Enabled:       true,
-					RPDisplayName: "Sub2API",
+					RPDisplayName: "paragateway",
 					RPID:          "https://sub2api.example.com",
 					RPOrigins:     []string{"https://sub2api.example.com"},
 				}
@@ -62,7 +62,7 @@ func TestValidateWebAuthnConfig(t *testing.T) {
 			configure: func(cfg *Config) {
 				cfg.WebAuthn = WebAuthnConfig{
 					Enabled:       true,
-					RPDisplayName: "Sub2API",
+					RPDisplayName: "paragateway",
 					RPID:          "sub2api.example.com",
 					RPOrigins:     []string{"http://sub2api.example.com"},
 				}
@@ -74,7 +74,7 @@ func TestValidateWebAuthnConfig(t *testing.T) {
 			configure: func(cfg *Config) {
 				cfg.WebAuthn = WebAuthnConfig{
 					Enabled:       true,
-					RPDisplayName: "Sub2API",
+					RPDisplayName: "paragateway",
 					RPID:          "example.com",
 					RPOrigins:     []string{"https://example.net"},
 				}

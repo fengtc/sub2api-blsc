@@ -17,7 +17,7 @@ export type QuotaResetMode = typeof QUOTA_RESET_MODE_ROLLING | typeof QUOTA_RESE
 /** GitHub fine-grained PAT creation page prefilled for personal AI Credits billing access. */
 export function buildCopilotBillingPATCreationURL(username = ''): string {
   const url = new URL('https://github.com/settings/personal-access-tokens/new')
-  url.searchParams.set('name', 'Sub2API Billing')
+  url.searchParams.set('name', 'paragateway Billing')
   url.searchParams.set('description', 'Read GitHub AI Credits usage')
   url.searchParams.set('expires_in', '90')
   url.searchParams.set('plan', 'read')

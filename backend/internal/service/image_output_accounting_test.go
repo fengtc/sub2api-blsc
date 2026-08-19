@@ -29,7 +29,7 @@ data: [DONE]`
 	}
 }
 
-func TestOpenAIImageOutputCounter_NestedSub2API_StandardResponse(t *testing.T) {
+func TestOpenAIImageOutputCounter_Nestedparagateway_StandardResponse(t *testing.T) {
 	// Simulate what a nested sub2api setup receives
 	// When the upstream sub2api returns a standard response, the downstream
 	// sub2api receives SSE events. This test verifies that no false positives

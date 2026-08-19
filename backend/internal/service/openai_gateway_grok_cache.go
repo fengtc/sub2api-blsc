@@ -14,8 +14,10 @@ import (
 )
 
 const (
-	grokConversationIDHeader         = "X-Grok-Conv-Id"
-	claudeCodeSessionHeader          = "X-Claude-Code-Session-Id"
+	grokConversationIDHeader = "X-Grok-Conv-Id"
+	claudeCodeSessionHeader  = "X-Claude-Code-Session-Id"
+	// Keep the wire-level header stable for existing clients; this is a protocol
+	// identifier rather than user-visible branding.
 	grokClientToolCacheOptInHeader   = "X-Sub2API-Grok-Client-Tool-Cache"
 	grokFreeCacheNativeToolsJSON     = `[{"type":"web_search"},{"type":"x_search"}]`
 	grokFreeCacheDisabledToolChoice  = "none"
